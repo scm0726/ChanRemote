@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"></head>
+<body style="margin:0;overflow:hidden;background:#000;cursor:none">
+  <div id="c" style="position:fixed;inset:0;background:#000;background-size:cover;background-position:center;background-repeat:no-repeat"></div>
+  <script>
+    const { ipcRenderer } = require('electron');
+    ipcRenderer.on('curtain-style', (e, o) => {
+      const c = document.getElementById('c');
+      if (o && o.mode === 'image' && o.image) {
+        c.style.background = '#000';
+        c.style.backgroundImage = 'url(' + o.image + ')';
+        c.style.backgroundSize = o.fit === 'fill' ? '100% 100%' : (o.fit === 'contain' ? 'contain' : 'cover');
+      } else {
+        c.style.backgroundImage = 'none';
+        c.style.background = (o && o.color) || '#000000';
+      }
+    });
+  </script>
+</body>
+</html>

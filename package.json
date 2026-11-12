@@ -1,7 +1,7 @@
 {
   "name": "chanremote",
   "productName": "ChanRemote",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "나만의 원격 제어 프로그램 (PC↔PC, PC↔모바일) — 무설치",
   "main": "src/main.js",
   "author": "chanmin",

@@ -394,6 +394,7 @@ function onDcMessage(p, raw) {
     case 'screens': refreshSources().then(() => sendHello(p)); break;
     case 'clip-get': H.clipGet().then(text => dcSend(p, { t: 'clip', text: String(text || '').slice(0, 200000) })); break;
     case 'clip-set': H.clipSet(String(m.text || '').slice(0, 200000)); break;
+    case 'curtain': H.curtain({ on: !!m.on, mode: m.mode, color: m.color, image: m.image, fit: m.fit }); break;
   }
 }
 

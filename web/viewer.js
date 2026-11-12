@@ -512,6 +512,7 @@
     ch.onopen = () => {
       S.lastPong = Date.now();
       dcSend({ t: 'quality', v: settings.quality });
+      if (settings.curtain.on) sendCurtain(); // 접속 시 커튼 자동 적용
     };
     ch.onmessage = e => {
       let m;
@@ -798,6 +799,7 @@
     quality: store.get('quality', 'auto'),
     sens: store.get('sens', 1.3),
     stats: store.get('stats', true),
+    curtain: store.get('curtain', { on: false, mode: 'color', color: '#000000', image: null, fit: 'cover' }),
     bar: true
   };
   function saveSettings() {
@@ -805,6 +807,23 @@
     store.set('quality', settings.quality);
     store.set('sens', settings.sens);
     store.set('stats', settings.stats);
+    store.set('curtain', settings.curtain);
+  }
+
+  // ── 커튼 모드: PC 모니터 가리기 ──
+  function curtainPayload(on) {
+    const c = settings.curtain;
+    return { t: 'curtain', on, mode: c.mode, color: c.color, image: c.mode === 'image' ? c.image : null, fit: c.fit };
+  }
+  function sendCurtain() { dcSend(curtainPayload(settings.curtain.on)); }
+  function applyCurtainUi() {
+    const c = settings.curtain;
+    $('#curtainBtn').textContent = c.on ? '끄기' : '켜기';
+    $('#curtainBtn').classList.toggle('danger', c.on);
+    segSelect('curtainMode', c.mode);
+    $('#curtainColor').value = c.color || '#000000';
+    $('#curtainColor').style.display = c.mode === 'color' ? '' : 'none';
+    $('#curtainImg').style.display = c.mode === 'image' ? '' : 'none';
   }
   function segSelect(id, value) {
     document.querySelectorAll(`#${id} button`).forEach(b => b.classList.toggle('on', b.dataset.v === value));
@@ -817,6 +836,7 @@
     $('#sens').value = settings.sens;
     $('#statsBtn').textContent = settings.stats ? '끄기' : '켜기';
     $('#statChip').hidden = !settings.stats;
+    applyCurtainUi();
     drawCursor();
   }
   function flashHint(text) {
@@ -846,6 +866,56 @@
   };
   $('#sens').oninput = e => { settings.sens = +e.target.value; saveSettings(); };
   $('#statsBtn').onclick = () => { settings.stats = !settings.stats; saveSettings(); applyMode(); };
+  $('#curtainBtn').onclick = () => {
+    settings.curtain.on = !settings.curtain.on;
+    saveSettings();
+    applyCurtainUi();
+    sendCurtain();
+    flashHint(settings.curtain.on ? 'PC 모니터를 가렸어요 (원격 화면엔 그대로 보여요)' : 'PC 모니터 가리기를 껐어요');
+  };
+  $('#curtainMode').onclick = e => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    settings.curtain.mode = b.dataset.v;
+    saveSettings();
+    applyCurtainUi();
+    if (settings.curtain.on) sendCurtain();
+  };
+  $('#curtainColor').oninput = e => {
+    settings.curtain.color = e.target.value;
+    settings.curtain.mode = 'color';
+    saveSettings();
+    if (settings.curtain.on) sendCurtain();
+  };
+  $('#curtainImg').onclick = () => $('#curtainFile').click();
+  $('#curtainFile').onchange = e => {
+    const f = e.target.files && e.target.files[0];
+    if (!f) return;
+    const r = new FileReader();
+    r.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        // 데이터 채널로 보내야 하므로 적당히 줄여서 용량을 작게 (최대 1920px, JPEG)
+        const max = 1920;
+        const scale = Math.min(1, max / Math.max(img.width, img.height));
+        const cv = document.createElement('canvas');
+        cv.width = Math.max(1, Math.round(img.width * scale));
+        cv.height = Math.max(1, Math.round(img.height * scale));
+        cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+        let q = 0.82, data = cv.toDataURL('image/jpeg', q);
+        while (data.length > 180000 && q > 0.3) { q -= 0.12; data = cv.toDataURL('image/jpeg', q); }
+        settings.curtain.image = data;
+        settings.curtain.mode = 'image';
+        saveSettings();
+        applyCurtainUi();
+        if (settings.curtain.on) sendCurtain();
+        toast('커튼 이미지를 설정했어요');
+      };
+      img.onerror = () => toast('이미지를 읽지 못했어요');
+      img.src = r.result;
+    };
+    r.readAsDataURL(f);
+  };
   $('#soundBtn').onclick = () => {
     const v = $('#video');
     v.muted = !v.muted;

@@ -304,6 +304,48 @@ async function applyUnattended() {
   log(`무인 접속 설정 적용: 절전·자동 잠금 해제 (${ok}/${results.length})`);
 }
 
+// ── 커튼 모드: PC 모니터엔 검은/지정 화면, 원격 화면엔 진짜 화면 ──
+// (커튼 창은 화면 캡처에서 제외 + 클릭 통과 → 원격 조작은 뒤 화면에 그대로 전달)
+let curtainWin = null;
+function showCurtain(opts) {
+  const { virt } = displays();
+  const bounds = { x: virt.x, y: virt.y, width: virt.width, height: virt.height };
+  if (!curtainWin || curtainWin.isDestroyed()) {
+    curtainWin = new BrowserWindow({
+      ...bounds,
+      frame: false,
+      backgroundColor: '#000000',
+      alwaysOnTop: true,
+      skipTaskbar: true,
+      focusable: false,
+      resizable: false,
+      movable: false,
+      minimizable: false,
+      fullscreenable: false,
+      show: false,
+      webPreferences: { nodeIntegration: true, contextIsolation: false, backgroundThrottling: false }
+    });
+    curtainWin.setAlwaysOnTop(true, 'screen-saver');
+    curtainWin.setIgnoreMouseEvents(true); // 클릭 통과
+    try { curtainWin.setContentProtection(true); } catch { /* 구버전 윈도우에선 원격에도 가려질 수 있음 */ }
+    curtainWin.loadFile(path.join(__dirname, 'curtain.html'));
+    curtainWin.on('closed', () => { curtainWin = null; });
+  }
+  curtainWin.setBounds(bounds);
+  const push = () => { try { curtainWin.webContents.send('curtain-style', opts || {}); } catch { /* ignore */ } };
+  if (curtainWin.webContents.isLoading()) curtainWin.webContents.once('did-finish-load', push);
+  else push();
+  curtainWin.showInactive();
+  curtainWin.setAlwaysOnTop(true, 'screen-saver');
+  log('커튼 모드 켜짐 — PC 모니터를 가렸어요');
+}
+function hideCurtain() {
+  if (curtainWin && !curtainWin.isDestroyed() && curtainWin.isVisible()) {
+    curtainWin.hide();
+    log('커튼 모드 꺼짐');
+  }
+}
+
 // ── 다른 PC에 원격 접속하는 창 ──
 function openViewerWindow() {
   if (viewerWin && !viewerWin.isDestroyed()) { viewerWin.show(); viewerWin.focus(); return; }
@@ -401,6 +443,7 @@ function setupIpc() {
   ipcMain.handle('set-start-hidden', (_e, on) => { cfg.startHidden = !!on; config.save(cfg); return cfg.startHidden; });
   ipcMain.handle('set-tray-hidden', (_e, on) => { cfg.trayHidden = !!on; config.save(cfg); applyTray(); return cfg.trayHidden; });
   ipcMain.on('open-viewer', () => openViewerWindow());
+  ipcMain.on('curtain', (_e, o) => { if (o && o.on) showCurtain(o); else hideCurtain(); });
   ipcMain.on('copy-text', (_e, t) => clipboard.writeText(String(t || '')));
   ipcMain.handle('set-upnp', async (_e, on) => { cfg.upnp = !!on; config.save(cfg); upnp.resetCache(); checkNetwork('설정 변경'); return cfg.upnp; });
   ipcMain.handle('recheck-net', () => { upnp.resetCache(); checkNetwork('다시 확인'); return true; });
@@ -479,6 +522,7 @@ async function startServers() {
       viewers.delete(id);
       send('viewer-leave', { id });
       input.releaseAll();
+      if (viewers.size === 0) hideCurtain();
       updateBlockers();
     }
   });
@@ -537,6 +581,7 @@ if (!app.requestSingleInstanceLock()) {
   app.on('before-quit', () => {
     quitting = true;
     input.releaseAll();
+    hideCurtain();
     if (relay) relay.stop();
     if (server) server.close();
     if (turn) turn.stop();

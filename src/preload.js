@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld('host', {
   setStartHidden: on => ipcRenderer.invoke('set-start-hidden', on),
   setTrayHidden: on => ipcRenderer.invoke('set-tray-hidden', on),
   openViewer: () => ipcRenderer.send('open-viewer'),
+  curtain: o => ipcRenderer.send('curtain', o),
   copyText: t => ipcRenderer.send('copy-text', t),
   setPort: p => ipcRenderer.invoke('set-port', p),
   setUpnp: on => ipcRenderer.invoke('set-upnp', on),

@@ -103,6 +103,19 @@
         </div>
       </div>
       <div class="setRow">
+        <span>PC 화면 가리기 (커튼)</span>
+        <button id="curtainBtn" class="ghost small">켜기</button>
+      </div>
+      <div class="setRow" id="curtainOpts">
+        <div class="seg" id="curtainMode">
+          <button data-v="color">색상</button>
+          <button data-v="image">이미지</button>
+        </div>
+        <input type="color" id="curtainColor" value="#000000">
+        <button id="curtainImg" class="ghost small">이미지 선택</button>
+        <input type="file" id="curtainFile" accept="image/*" hidden>
+      </div>
+      <div class="setRow">
         <span>커서 속도</span>
         <input type="range" id="sens" min="0.5" max="3" step="0.1">
       </div>
