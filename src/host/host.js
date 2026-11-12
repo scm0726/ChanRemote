@@ -175,7 +175,9 @@ async function openCapture(sourceId) {
   }
   const vt = stream.getVideoTracks()[0];
   if (vt) {
-    vt.contentHint = 'detail'; // 글자가 선명하게
+    vt.contentHint = 'motion'; // 부드러운 움직임 우선 (detail은 프레임을 1fps까지 떨어뜨림)
+    // 캡처 프레임레이트를 확실히 올림 (일부 환경에서 기본값이 너무 낮음)
+    try { vt.applyConstraints({ frameRate: { min: 15, ideal: 30, max: 60 } }); } catch { /* ignore */ }
     vt.addEventListener('ended', () => recoverCapture(sourceId));
   }
   return stream;
@@ -266,7 +268,7 @@ async function applyQuality(p, mode) {
     const params = p.videoSender.getParameters();
     if (!params.encodings || !params.encodings.length) params.encodings = [{}];
     Object.assign(params.encodings[0], { maxBitrate: q.maxBitrate, maxFramerate: q.maxFramerate, scaleResolutionDownBy: q.scale });
-    params.degradationPreference = 'balanced';
+    params.degradationPreference = 'maintain-framerate'; // 느려지면 해상도를 낮추고 fps는 유지
     await p.videoSender.setParameters(params);
   } catch (e) {
     localLog('화질 설정 실패: ' + e.message);
@@ -344,6 +346,7 @@ async function createPeer(id) {
   const atx = pc.addTransceiver(at || 'audio', { direction: 'sendonly', streams: [stream] });
   p.audioSender = atx.sender;
 
+  await applyQuality(p, 'auto'); // 시작부터 fps 유지(maintain-framerate) 적용
   p.statsTimer = setInterval(() => updatePeerStats(p), 2000);
   await negotiate(p);
   renderViewers();

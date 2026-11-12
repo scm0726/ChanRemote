@@ -31,7 +31,7 @@ fi
 
 # 버전 (빌드 번호)
 CODE="${GITHUB_RUN_NUMBER:-1}"
-sed -i -E "s/versionCode [0-9]+/versionCode ${CODE}/; s/versionName \"[^\"]*\"/versionName \"1.4.${CODE}\"/" android/app/build.gradle
+sed -i -E "s/versionCode [0-9]+/versionCode ${CODE}/; s/versionName \"[^\"]*\"/versionName \"1.5.${CODE}\"/" android/app/build.gradle
 
 # 항상 같은 서명키 → 새 버전을 덮어서 설치 가능
 mkdir -p ~/.android
