@@ -140,3 +140,6 @@ h2 { margin: 0 0 12px; font-size: 17px; }
   position: fixed; left: 0; bottom: 0; width: 2px; height: 2px; opacity: 0; padding: 0; border: 0;
   font-size: 16px; resize: none; z-index: -1;
 }
+.pc .state { font-size: 12px; padding: 3px 9px; border-radius: 999px; background: #1d2431; color: #8b93a7; flex: none; }
+.pc .state.on { background: #12351f; color: #6ee7a0; }
+.pc .state.off { background: #2a1d22; color: #ff9b9b; }

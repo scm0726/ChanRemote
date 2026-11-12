@@ -1,13 +1,15 @@
 'use strict';
 const { contextBridge, ipcRenderer } = require('electron');
 
-const EVENTS = ['viewer-join', 'viewer-leave', 'viewer-resume', 'signal', 'log', 'displays-changed', 'net-status'];
+const EVENTS = ['viewer-join', 'viewer-leave', 'viewer-resume', 'signal', 'log', 'displays-changed', 'net-status', 'relay-status'];
 
 contextBridge.exposeInMainWorld('host', {
   state: () => ipcRenderer.invoke('state'),
   setPassword: pw => ipcRenderer.invoke('set-password', pw),
   setAutoStart: on => ipcRenderer.invoke('set-autostart', on),
-  setKeepAwake: on => ipcRenderer.invoke('set-keepawake', on),
+  setUnattended: on => ipcRenderer.invoke('set-unattended', on),
+  openViewer: () => ipcRenderer.send('open-viewer'),
+  copyText: t => ipcRenderer.send('copy-text', t),
   setPort: p => ipcRenderer.invoke('set-port', p),
   setUpnp: on => ipcRenderer.invoke('set-upnp', on),
   recheckNet: () => ipcRenderer.invoke('recheck-net'),

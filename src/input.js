@@ -159,9 +159,23 @@ function text(s) {
   flush();
 }
 
+// 꺼진 모니터 깨우기 (마우스를 1픽셀 움직였다 되돌림)
+function wake() {
+  if (!api) return;
+  const buf = Buffer.alloc(INPUT_SIZE * 2);
+  [[1, 0], [-1, 0]].forEach(([dx, dy], i) => {
+    const o = i * INPUT_SIZE;
+    buf.writeUInt32LE(INPUT_MOUSE, o);
+    buf.writeInt32LE(dx, o + 8);
+    buf.writeInt32LE(dy, o + 12);
+    buf.writeUInt32LE(0x0001, o + 20); // MOUSEEVENTF_MOVE
+  });
+  sendBuffer(buf, 2);
+}
+
 function releaseAll() {
   for (const [vk, ext] of [...heldKeys]) key(vk, false, ext);
   for (const b of [...heldButtons]) button(b, false);
 }
 
-module.exports = { init, moveTo, button, wheel, key, press, combo, text, releaseAll };
+module.exports = { init, moveTo, button, wheel, key, press, combo, text, releaseAll, wake };

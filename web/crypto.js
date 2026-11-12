@@ -91,3 +91,48 @@
 
   root.CRCrypto = { sha256, hmac, pbkdf2, utf8, hex, unhex };
 })(typeof window !== 'undefined' ? window : globalThis);
+
+// 공개 중계망(MQTT)으로 오가는 메시지 암호화: HMAC-SHA256 카운터 모드 + HMAC 인증 (encrypt-then-MAC)
+(function (root) {
+  const C = root.CRCrypto;
+  const u32 = n => new Uint8Array([(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255]);
+  const cat = (...arrs) => {
+    const out = new Uint8Array(arrs.reduce((s, a) => s + a.length, 0));
+    let o = 0;
+    for (const a of arrs) { out.set(a, o); o += a.length; }
+    return out;
+  };
+  function keys(kenc) { return { ks: C.hmac(kenc, C.utf8('ks')), km: C.hmac(kenc, C.utf8('mac')) }; }
+  function stream(ks, iv, data) {
+    const out = new Uint8Array(data.length);
+    for (let i = 0, b = 0; i < data.length; b++) {
+      const block = C.hmac(ks, cat(iv, u32(b)));
+      for (let j = 0; j < 32 && i < data.length; j++, i++) out[i] = data[i] ^ block[j];
+    }
+    return out;
+  }
+  const b64 = bytes => { let s = ''; for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000)); return btoa(s); };
+  const unb64 = str => { const s = atob(str); const out = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i); return out; };
+  function seal(kenc, text) {
+    const { ks, km } = keys(kenc);
+    const iv = new Uint8Array(16);
+    crypto.getRandomValues(iv);
+    const ct = stream(ks, iv, C.utf8(text));
+    const tag = C.hmac(km, cat(iv, ct)).subarray(0, 16);
+    return b64(cat(iv, ct, tag));
+  }
+  function open(kenc, str) {
+    let raw;
+    try { raw = unb64(str); } catch { return null; }
+    if (raw.length < 32) return null;
+    const iv = raw.subarray(0, 16), ct = raw.subarray(16, raw.length - 16), tag = raw.subarray(raw.length - 16);
+    const { ks, km } = keys(kenc);
+    const expect = C.hmac(km, cat(iv, ct));
+    let diff = 0;
+    for (let i = 0; i < 16; i++) diff |= expect[i] ^ tag[i];
+    if (diff) return null;
+    return new TextDecoder().decode(stream(ks, iv, ct));
+  }
+  C.seal = seal;
+  C.open = open;
+})(typeof window !== 'undefined' ? window : globalThis);

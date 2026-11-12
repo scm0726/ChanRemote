@@ -3,17 +3,18 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-const ITER = 50000;
+const ITER = 100000;
 
 const DEFAULTS = {
   port: 8787, // 접속(웹/시그널링) TCP 포트
   turnPort: 3478, // 내장 중계 UDP+TCP 포트
-  upnp: true, // 공유기 포트 자동 열기
+  deviceId: null, // 9자리 PC ID (첫 실행 때 생성)
+  unattended: true, // 무인 접속 (기본 켜짐): 절전·화면잠금 해제, 수락 없이 바로 접속
+  upnp: true, // 공유기 포트 자동 열기 (직접 연결이 막힐 때 대비용)
   salt: null,
   iter: ITER,
   key: null, // PBKDF2-SHA256(비밀번호) — 비밀번호 원문은 저장하지 않음
   autoStart: true,
-  keepAwake: true,
   turn: null // 외부 TURN을 따로 쓸 때만: { urls, username, credential }
 };
 
@@ -25,7 +26,14 @@ function load(app) {
   try { cfg = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { /* 첫 실행 */ }
   const merged = { ...DEFAULTS, ...cfg };
   delete merged.passwordHash; // 구버전 형식 제거
+  delete merged.keepAwake;
+  if (!/^\d{9}$/.test(String(merged.deviceId || ''))) merged.deviceId = newDeviceId();
   return merged;
+}
+
+function newDeviceId() {
+  // 첫 자리는 0이 아니게, 9자리 숫자
+  return String(crypto.randomInt(1, 10)) + String(crypto.randomInt(0, 1e8)).padStart(8, '0');
 }
 
 function save(cfg) {

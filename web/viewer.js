@@ -17,22 +17,19 @@
   const now = () => performance.now();
 
   // ═════════════════════════ PC 목록 ═════════════════════════
+  const R = window.CRRelay;
   let pcs = store.get('pcs', []);
+  // 예전 형식(주소 목록) → 새 형식
+  pcs.forEach(p => { if (!p.lan && Array.isArray(p.addrs) && p.addrs.length) p.lan = p.lastAddr || p.addrs[0]; delete p.addrs; delete p.wan; delete p.lastAddr; });
   const savePcs = () => store.set('pcs', pcs);
+  const fmtId = id => String(id || '').replace(/(\d{3})(\d{3})(\d{3})/, '$1 $2 $3');
+  const cleanId = v => String(v || '').replace(/\D/g, '');
 
-  function normAddr(a) {
-    a = String(a || '').trim().replace(/^[a-z]+:\/\//i, '').replace(/\/.*$/, '');
-    if (!a) return '';
-    if (!/:\d+$/.test(a)) a += ':' + DEFAULT_PORT;
-    return a;
-  }
-
-  // PC가 직접 띄워준 페이지로 들어온 경우: 이 PC를 목록에 자동 추가
-  if (!isApp && location.host && /^https?:$/.test(location.protocol)) {
-    if (!pcs.some(p => p.addrs.includes(location.host))) {
-      pcs.unshift({ id: 'pc' + Date.now(), name: '이 PC', addrs: [location.host], lastAddr: location.host });
-      savePcs();
-    }
+  // PC가 직접 띄워준 페이지(같은 와이파이)로 들어온 경우: 이 PC를 목록에 자동 추가
+  const servedByPc = !isApp && /^https?:$/.test(location.protocol) && !!location.host;
+  if (servedByPc && !pcs.some(p => p.lan === location.host)) {
+    pcs.unshift({ id: null, name: '이 PC', lan: location.host });
+    savePcs();
   }
 
   function toast(text, ms = 2600) {
@@ -43,25 +40,39 @@
     toast.timer = setTimeout(() => { t.hidden = true; }, ms);
   }
 
+  function presenceText(pc) {
+    if (!pc.id) return { cls: '', text: '같은 와이파이' };
+    const p = R.presence(pc.id);
+    if (!p) return { cls: 'wait', text: '확인 중' };
+    return p.on ? { cls: 'on', text: '켜짐' } : { cls: 'off', text: '꺼짐' };
+  }
+
   function renderHome() {
     const box = $('#pcList');
     box.innerHTML = '';
     if (!pcs.length) {
-      box.innerHTML = '<div class="emptyCard">아직 추가한 PC가 없어요.<br>PC에서 ChanRemote를 실행하고 주소를 추가하세요.</div>';
+      box.innerHTML = '<div class="emptyCard">아직 추가한 PC가 없어요.<br>PC에서 ChanRemote를 설치하면 나오는<br><b>PC ID</b>와 비밀번호로 추가하세요.</div>';
     }
     for (const pc of pcs) {
+      if (pc.id) R.watchPresence(pc.id);
+      const st = presenceText(pc);
       const el = document.createElement('div');
       el.className = 'pc';
-      el.innerHTML = '<div class="pcIcon">🖥</div><div class="info"><div class="name"></div><div class="addr"></div></div><button class="more" aria-label="메뉴">⋮</button>';
+      el.innerHTML = '<div class="pcIcon">🖥</div><div class="info"><div class="name"></div><div class="addr"></div></div><span class="state"></span><button class="more" aria-label="메뉴">⋮</button>';
       el.querySelector('.name').textContent = pc.name || pc.hostName || 'PC';
-      const wan = pc.wan ? ' · 외부 ' + pc.wan : '';
-      el.querySelector('.addr').textContent = (pc.addrs[0] || '') + wan;
+      el.querySelector('.addr').textContent = pc.id ? `ID ${fmtId(pc.id)}` : pc.lan;
+      const stEl = el.querySelector('.state');
+      stEl.className = 'state ' + st.cls;
+      stEl.textContent = st.text;
       el.onclick = e => { if (!e.target.closest('.more')) connectPc(pc); };
       el.querySelector('.more').onclick = () => pcMenu(pc);
       box.appendChild(el);
     }
-    $('#homeHint').textContent = isApp ? '' : '폰에서는 ChanRemote 앱을 쓰면 더 편해요.';
+    const n = R.connectedCount();
+    $('#homeHint').textContent = R.available() ? (n ? `중계망 연결됨 (${n}/${R.total()})` : '중계망에 연결하는 중…') : '';
   }
+  R.onPresence(() => { if (!$('#home').hidden) renderHome(); });
+  R.onStatus(() => { if (!$('#home').hidden) renderHome(); });
 
   function pcMenu(pc) {
     const choice = prompt(`${pc.name || 'PC'}\n1: 이름 바꾸기\n2: 저장된 비밀번호 지우기\n3: 목록에서 삭제`, '');
@@ -94,17 +105,22 @@
 
   $('#addPcBtn').onclick = () => openSheet(null);
   $('#sheetCancel').onclick = closeSheet;
+  $('#fAddr').addEventListener('input', e => {
+    const d = cleanId(e.target.value).slice(0, 9);
+    const f = d.replace(/(\d{3})(?=\d)/g, '$1 ');
+    if (e.target.value !== f) e.target.value = f;
+  });
   $('#sheetForm').onsubmit = e => {
     e.preventDefault();
     const pw = $('#fPw').value;
     if (!pw) { $('#sheetErr').textContent = '비밀번호를 입력하세요'; return; }
     let pc = sheetPc;
     if (!pc) {
-      const addr = normAddr($('#fAddr').value);
-      if (!addr) { $('#sheetErr').textContent = 'PC 주소를 입력하세요'; return; }
-      pc = pcs.find(p => p.addrs.includes(addr));
+      const id = cleanId($('#fAddr').value);
+      if (!/^\d{9}$/.test(id)) { $('#sheetErr').textContent = 'PC ID 9자리를 입력하세요'; return; }
+      pc = pcs.find(p => p.id === id);
       if (!pc) {
-        pc = { id: 'pc' + Date.now(), name: $('#fName').value.trim(), addrs: [addr], lastAddr: addr };
+        pc = { id, name: $('#fName').value.trim(), lan: null };
         pcs.push(pc);
         savePcs();
       }
@@ -123,6 +139,7 @@
     if (/SM-F9/i.test(ua)) return '갤럭시 폴드';
     if (/Android/i.test(ua)) return isApp ? '안드로이드 앱' : '안드로이드';
     if (/iPhone|iPad/i.test(ua)) return 'iPhone/iPad';
+    if (/Electron/i.test(ua)) return 'PC (ChanRemote)';
     if (/Windows/i.test(ua)) return 'Windows PC';
     if (/Mac/i.test(ua)) return 'Mac';
     return '뷰어';
@@ -130,75 +147,75 @@
 
   // ═════════════════════════ 연결 ═════════════════════════
   const S = {
-    pc: null, password: null, remember: true, ending: true,
-    ws: null, wsAddr: null, sessKey: null, token: null, id: null, authed: false,
+    pc: null, password: null, remember: true, secret: null, ending: true,
+    ch: null, sessKey: null, token: null, id: null, authed: false,
     turn: null, ice: [], wsTimer: null, backoff: 500, everConnected: false,
     rtc: null, sid: null, dc: null, pendingCands: [], sigChain: Promise.resolve(),
-    restartTimer: null, renewTimer: null, lastPong: 0, rtt: 0,
+    restartTimer: null, renewTimer: null, lastPong: 0, lastChMsg: 0, rtt: 0,
     pingTimer: null, statsTimer: null, prevStats: null, wakeLock: null
   };
 
   const wsScheme = () => (!isApp && location.protocol === 'https:' ? 'wss' : 'ws');
 
-  function orderedAddrs(pc) {
-    const list = [];
-    const add = a => { if (a && !list.includes(a)) list.push(a); };
-    add(pc.lastAddr);
-    pc.addrs.forEach(add);
-    add(pc.wan);
-    return list.slice(0, 8);
+  // 같은 와이파이용 직접 연결(웹소켓)을 채널 모양으로 감싸기
+  function wsChannel(addr) {
+    const ch = { kind: 'lan', closed: false, onmessage: null, onclose: null, kenc: null };
+    let ws;
+    try { ws = new WebSocket(`${wsScheme()}://${addr}/ws`); } catch { return null; }
+    ws.onmessage = e => { let m; try { m = JSON.parse(e.data); } catch { return; } if (ch.onmessage) ch.onmessage(m); };
+    ws.onclose = () => { if (ch.closed) return; ch.closed = true; if (ch.onclose) ch.onclose(); };
+    ws.onerror = () => {};
+    ch.send = obj => { if (ws.readyState === 1) { try { ws.send(JSON.stringify(obj)); } catch { /* ignore */ } } };
+    ch.close = () => { if (ch.closed) return; ch.closed = true; try { ws.close(); } catch { /* ignore */ } if (ch.onclose) ch.onclose(); };
+    return ch;
   }
 
   function startSession(pc, password, remember) {
     teardown(true);
     Object.assign(S, { pc, password, remember, secret: null, ending: false, token: null, authed: false, everConnected: false, backoff: 500 });
     showStage();
-    showOverlay('PC에 연결하는 중…');
-    openSocket();
+    showOverlay(pc.id ? 'PC를 찾는 중…' : 'PC에 연결하는 중…');
+    openChannel();
   }
 
-  // 등록된 주소 전부에 동시에 접속 시도 → 가장 먼저 응답한 곳 사용 (집/밖 자동 전환)
-  function openSocket() {
+  // 중계망(ID) + 같은 와이파이(직접) 동시에 시도 → 먼저 응답한 쪽 사용
+  function openChannel() {
     clearTimeout(S.wsTimer);
     if (S.ending) return;
-    const addrs = orderedAddrs(S.pc);
-    let won = false;
-    let done = false;
+    const pc = S.pc;
     const tries = [];
+    if (pc.lan) { const c = wsChannel(pc.lan); if (c) tries.push(c); }
+    if (pc.id && R.available()) tries.push(R.openChannel(pc.id));
+    let won = false, done = false;
     const fail = () => {
       if (won || done) return;
       done = true;
-      tries.forEach(w => { try { w.close(); } catch { /* ignore */ } });
-      onSocketFail();
+      tries.forEach(c => c.close());
+      onChannelFail();
     };
-    const timer = setTimeout(fail, 8000);
-    for (const addr of addrs) {
-      let ws;
-      try { ws = new WebSocket(`${wsScheme()}://${addr}/ws`); } catch { continue; }
-      tries.push(ws);
-      ws.onmessage = e => {
-        if (won) return;
-        let m;
-        try { m = JSON.parse(e.data); } catch { return; }
-        if (m.t !== 'hello') return;
+    const timer = setTimeout(fail, 15000);
+    for (const ch of tries) {
+      ch.onmessage = m => {
+        if (won || m.t !== 'hello') return;
         won = true;
         clearTimeout(timer);
-        tries.forEach(w => { if (w !== ws) { try { w.close(); } catch { /* ignore */ } } });
-        adoptSocket(ws, addr, m);
+        tries.forEach(c => { if (c !== ch) c.close(); });
+        adoptChannel(ch, m);
       };
-      ws.onerror = () => {};
-      ws.onclose = () => {
-        if (!won && tries.every(w => w.readyState === 3)) { clearTimeout(timer); fail(); }
-      };
+      ch.onclose = () => { if (!won && tries.every(c => c.closed)) { clearTimeout(timer); fail(); } };
     }
     if (!tries.length) { clearTimeout(timer); fail(); }
   }
 
-  function onSocketFail() {
+  function onChannelFail() {
     if (S.ending) return;
     if (!S.everConnected && !S.authed) {
+      const pc = S.pc;
+      const p = pc && pc.id ? R.presence(pc.id) : null;
       endSession();
-      toast('PC에 연결할 수 없어요. PC 프로그램이 켜져 있는지, 주소가 맞는지 확인하세요', 4500);
+      if (p && !p.on) toast('PC가 꺼져 있거나 인터넷에 연결돼 있지 않아요', 4500);
+      else if (pc && pc.id && !R.connectedCount()) toast('폰 인터넷 연결을 확인하세요', 4000);
+      else toast('PC에 연결할 수 없어요. PC ID와 PC 프로그램이 켜져 있는지 확인하세요', 4500);
       return;
     }
     scheduleReconnect();
@@ -208,22 +225,18 @@
     if (S.ending) return;
     showOverlay('네트워크가 바뀌었거나 끊겼어요. 다시 연결하는 중…');
     clearTimeout(S.wsTimer);
-    S.wsTimer = setTimeout(openSocket, S.backoff);
+    S.wsTimer = setTimeout(openChannel, S.backoff);
     S.backoff = Math.min(S.backoff * 2, 4000);
   }
 
-  function adoptSocket(ws, addr, hello) {
-    S.ws = ws;
-    S.wsAddr = addr;
+  function adoptChannel(ch, hello) {
+    S.ch = ch;
     S.backoff = 500;
-    ws.onmessage = e => {
-      let m;
-      try { m = JSON.parse(e.data); } catch { return; }
-      onWs(m);
-    };
-    ws.onclose = () => {
-      if (S.ws !== ws) return;
-      S.ws = null;
+    S.lastChMsg = Date.now();
+    ch.onmessage = m => { S.lastChMsg = Date.now(); onWs(m); };
+    ch.onclose = () => {
+      if (S.ch !== ch) return;
+      S.ch = null;
       if (!S.ending) scheduleReconnect();
     };
     if (!hello.salt) { endSession(); toast('PC 프로그램에서 먼저 비밀번호를 정해 주세요', 4000); return; }
@@ -231,13 +244,15 @@
     const secret = S.secret && S.secret.salt === hello.salt ? S.secret : (S.pc.salt === hello.salt ? { key: S.pc.key, salt: S.pc.salt } : null);
     let keyHex = secret ? secret.key : null;
     if (S.password == null && !keyHex) {
+      const pc = S.pc;
       endSession();
-      openSheet(S.pc, 'PC 비밀번호가 바뀌었어요. 다시 입력하세요');
+      openSheet(pc, 'PC 비밀번호가 바뀌었어요. 다시 입력하세요');
       return;
     }
     const finish = () => {
-      if (S.ws !== ws) return;
+      if (S.ch !== ch) return;
       const key = C.unhex(keyHex);
+      ch.kenc = C.hmac(key, C.utf8('enc:' + hello.nonce));
       S.sessKey = C.hmac(key, C.utf8('sess:' + hello.nonce));
       S.pendingSecret = { key: keyHex, salt: hello.salt };
       wsSend({ t: 'auth', proof: C.hex(C.hmac(key, C.utf8('auth:' + hello.nonce))), name: deviceName(), resume: S.token });
@@ -245,7 +260,7 @@
     if (S.password != null) {
       showOverlay('비밀번호 확인 중…');
       setTimeout(() => {
-        keyHex = C.hex(C.pbkdf2(C.utf8(S.password), C.unhex(hello.salt), hello.iter || 50000, 32));
+        keyHex = C.hex(C.pbkdf2(C.utf8(S.password), C.unhex(hello.salt), hello.iter || 100000, 32));
         finish();
       }, 30);
     } else {
@@ -253,11 +268,7 @@
     }
   }
 
-  function wsSend(obj) {
-    if (S.ws && S.ws.readyState === 1) {
-      try { S.ws.send(JSON.stringify(obj)); } catch { /* ignore */ }
-    }
-  }
+  function wsSend(obj) { if (S.ch && !S.ch.closed) S.ch.send(obj); }
   const sig = data => wsSend({ t: 'signal', data });
 
   function onWs(m) {
@@ -276,13 +287,12 @@
         }
         S.password = null;
         if (m.hostName) { pc.hostName = m.hostName; if (!pc.name || pc.name === '이 PC') pc.name = m.hostName; }
-        if (m.addrs) {
-          for (const a of m.addrs.lan || []) if (!pc.addrs.includes(a)) pc.addrs.push(a);
-          if (m.addrs.wan) pc.wan = m.addrs.wan;
-          pc.addrs = pc.addrs.slice(-8);
-        }
-        pc.lastAddr = S.wsAddr;
+        if (m.deviceId && !pc.id) pc.id = m.deviceId;
+        if (m.addrs && m.addrs.lan && m.addrs.lan[0] && S.ch && S.ch.kind === 'lan') pc.lan = pc.lan || m.addrs.lan[0];
         if (!pcs.includes(pc)) pcs.push(pc);
+        // 같은 PC가 목록에 두 번(와이파이/ID) 있으면 하나로 합치기
+        const dup = pcs.find(p => p !== pc && pc.id && p.id === pc.id);
+        if (dup) pcs = pcs.filter(p => p !== dup);
         savePcs();
         if (S.rtc) {
           try { S.rtc.setConfiguration({ ...S.rtc.getConfiguration(), iceServers: iceServers() }); } catch { /* ignore */ }
@@ -313,13 +323,14 @@
 
   function iceServers() {
     const list = [...(S.ice || [])];
-    if (S.turn && S.wsAddr) {
-      const host = S.wsAddr.replace(/:\d+$/, '');
-      list.push({
-        urls: [`turn:${host}:${S.turn.port}?transport=udp`, `turn:${host}:${S.turn.port}?transport=tcp`],
-        username: S.turn.username,
-        credential: S.turn.credential
-      });
+    const t = S.turn;
+    if (t && t.username) {
+      const hosts = [];
+      if (S.ch && S.ch.kind === 'lan' && t.lan) hosts.push(t.lan);
+      if (t.host) hosts.push(t.host);
+      for (const h of hosts) {
+        list.push({ urls: [`turn:${h}:${t.port}?transport=udp`, `turn:${h}:${t.port}?transport=tcp`], username: t.username, credential: t.credential });
+      }
     }
     return list;
   }
@@ -453,6 +464,11 @@
   // 2초마다 생존 확인 → 응답이 없으면 즉시 복구 시작
   function pingLoop() {
     if (S.ending) return;
+    // 연결 채널(중계망/직접) 생존 확인
+    if (S.ch && S.authed) {
+      if (!S.lastChPing || Date.now() - S.lastChPing > 10000) { S.lastChPing = Date.now(); wsSend({ t: 'ping', ts: Date.now() }); }
+      if (Date.now() - S.lastChMsg > 35000) { S.lastChMsg = Date.now(); S.ch.close(); }
+    }
     if (S.dc && S.dc.readyState === 'open') dcSend({ t: 'ping', ts: now() });
     if (S.rtc && S.rtc.connectionState === 'connected' && S.lastPong && Date.now() - S.lastPong > 7000) {
       showOverlay('응답이 없어요… 복구 중');
@@ -496,11 +512,11 @@
     S.ending = true;
     clearTimeout(S.wsTimer); clearTimeout(S.restartTimer); clearTimeout(S.renewTimer);
     S.restartTimer = S.renewTimer = null;
-    if (S.ws) {
+    if (S.ch) {
       if (!silent) wsSend({ t: 'bye' });
-      const ws = S.ws;
-      S.ws = null;
-      setTimeout(() => { try { ws.close(); } catch { /* ignore */ } }, 50);
+      const ch = S.ch;
+      S.ch = null;
+      setTimeout(() => ch.close(), 80);
     }
     closeRtc();
     S.sessKey = null;
@@ -1102,7 +1118,7 @@
   function wakeUp() {
     if (S.ending || $('#stage').hidden) return;
     requestWakeLock();
-    if (!S.ws) { clearTimeout(S.wsTimer); S.backoff = 300; openSocket(); }
+    if (!S.ch) { clearTimeout(S.wsTimer); S.backoff = 300; openChannel(); }
     else if (!rtcHealthy()) { requestRestart(); armRenew(5000); }
   }
   document.addEventListener('visibilitychange', () => {
@@ -1133,9 +1149,10 @@
   // 시작
   applyMode();
   renderHome();
-  if (!isApp && pcs.length === 1 && pcs[0].key && pcs[0].addrs.includes(location.host)) {
+  if (servedByPc && pcs.length === 1 && pcs[0].key && pcs[0].lan === location.host) {
     connectPc(pcs[0]); // 이 PC가 띄운 페이지 + 비밀번호 저장됨 → 바로 연결
   }
+  R.ensure();
 
   window.__cr = { S, settings, view, cursor }; // 디버깅용
 })();

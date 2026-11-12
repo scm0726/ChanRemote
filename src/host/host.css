@@ -67,3 +67,11 @@ pre#log {
 .meta { font-size: 12px; color: #8b93a7; }
 .tag.ts { background: #12351f; color: #6ee7a0; }
 #wanAddr { cursor: default; }
+.idCard { background: linear-gradient(180deg, #17213a, #141a25); border-color: #2a3a63; }
+.idLabel { color: #8fb0ff; font-size: 13px; }
+.idRow { display: flex; align-items: center; gap: 10px; margin: 2px 0 8px; }
+.idNum { font: 600 34px/1.2 Consolas, "Segoe UI", monospace; letter-spacing: 2px; flex: 1; color: #fff; }
+.netRow.small { margin: 8px 0; }
+button.small { padding: 6px 10px; font-size: 12.5px; }
+button.wide { width: 100%; }
+.toggle span b { color: #e6e8ee; }

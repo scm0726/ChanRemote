@@ -1,8 +1,9 @@
 'use strict';
 const {
   app, BrowserWindow, Tray, Menu, ipcMain, desktopCapturer, screen,
-  powerSaveBlocker, clipboard, nativeImage, dialog, shell
+  powerSaveBlocker, clipboard, nativeImage, dialog, shell, Notification
 } = require('electron');
+const { execFile } = require('child_process');
 const path = require('path');
 const os = require('os');
 const dgram = require('dgram');
@@ -12,6 +13,7 @@ const config = require('./config');
 const { createSignalServer } = require('./server');
 const { createTurnServer, stunPublicIp } = require('./turn');
 const upnp = require('./upnp');
+const { createMqttRelay } = require('./mqtt-relay');
 const input = require('./input');
 
 // ── 끊김 방지: 창이 숨겨져 있어도 캡처/전송이 느려지지 않게 ──
@@ -29,6 +31,9 @@ let win = null;
 let tray = null;
 let server = null;
 let turn = null;
+let relay = null;
+let relayStatus = { connected: 0, total: 3 };
+let viewerWin = null;
 let quitting = false;
 let sessionBlocker = null;
 let awakeBlocker = null;
@@ -51,7 +56,7 @@ function send(ch, data) {
 }
 
 function stunServers() {
-  const list = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }];
+  const list = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302', 'stun:stun.cloudflare.com:3478'] }];
   if (cfg.turn) list.push(...(Array.isArray(cfg.turn) ? cfg.turn : [cfg.turn]));
   return list;
 }
@@ -215,8 +220,8 @@ async function getSources() {
 function updateBlockers() {
   if (viewers.size > 0 && sessionBlocker === null) sessionBlocker = powerSaveBlocker.start('prevent-display-sleep');
   if (viewers.size === 0 && sessionBlocker !== null) { powerSaveBlocker.stop(sessionBlocker); sessionBlocker = null; }
-  if (cfg.keepAwake && awakeBlocker === null) awakeBlocker = powerSaveBlocker.start('prevent-app-suspension');
-  if (!cfg.keepAwake && awakeBlocker !== null) { powerSaveBlocker.stop(awakeBlocker); awakeBlocker = null; }
+  if (cfg.unattended && awakeBlocker === null) awakeBlocker = powerSaveBlocker.start('prevent-app-suspension');
+  if (!cfg.unattended && awakeBlocker !== null) { powerSaveBlocker.stop(awakeBlocker); awakeBlocker = null; }
   updateTray();
 }
 
@@ -238,14 +243,57 @@ function showWindow() {
 
 function updateTray() {
   if (!tray) return;
-  tray.setToolTip(`ChanRemote — ${viewers.size ? `접속 ${viewers.size}명` : '대기 중'}`);
+  tray.setToolTip(`ChanRemote — ID ${cfg.deviceId} — ${viewers.size ? `접속 ${viewers.size}명` : relayStatus.connected ? '대기 중' : '인터넷 연결 확인 중'}`);
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: 'ChanRemote 열기', click: showWindow },
+    { label: '다른 PC 원격 접속', click: openViewerWindow },
     { label: viewers.size ? `접속 중: ${[...viewers.values()].map(v => v.name).join(', ')}` : '접속자 없음', enabled: false },
     { type: 'separator' },
     { label: '모든 접속 끊기', enabled: viewers.size > 0, click: () => server && server.kickAll() },
     { label: '종료', click: () => { quitting = true; app.quit(); } }
   ]));
+}
+
+// ── 무인 접속: 자리에 아무도 없어도 접속되도록 절전·자동 잠금 끄기 ──
+function run(cmd, args) {
+  return new Promise(resolve => execFile(cmd, args, { windowsHide: true }, err => resolve(!err)));
+}
+async function applyUnattended() {
+  if (process.platform !== 'win32' || !cfg.unattended) return;
+  const results = await Promise.all([
+    run('powercfg', ['/change', 'standby-timeout-ac', '0']),
+    run('powercfg', ['/change', 'hibernate-timeout-ac', '0']),
+    run('powercfg', ['/SETACVALUEINDEX', 'SCHEME_CURRENT', 'SUB_NONE', 'CONSOLELOCK', '0']),
+    run('reg', ['add', 'HKCU\\Control Panel\\Desktop', '/v', 'ScreenSaverIsSecure', '/t', 'REG_SZ', '/d', '0', '/f']),
+    run('reg', ['add', 'HKCU\\Control Panel\\Desktop', '/v', 'ScreenSaveActive', '/t', 'REG_SZ', '/d', '0', '/f']),
+    run('reg', ['add', 'HKCU\\Software\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon', '/v', 'EnableGoodbye', '/t', 'REG_DWORD', '/d', '0', '/f'])
+  ]);
+  await run('powercfg', ['/SETACTIVE', 'SCHEME_CURRENT']);
+  const ok = results.filter(Boolean).length;
+  log(`무인 접속 설정 적용: 절전·자동 잠금 해제 (${ok}/${results.length})`);
+}
+
+function notify(body) {
+  try {
+    if (Notification.isSupported()) new Notification({ title: 'ChanRemote', body, icon: ICON, silent: true }).show();
+  } catch { /* ignore */ }
+}
+
+// ── 다른 PC에 원격 접속하는 창 ──
+function openViewerWindow() {
+  if (viewerWin && !viewerWin.isDestroyed()) { viewerWin.show(); viewerWin.focus(); return; }
+  viewerWin = new BrowserWindow({
+    width: 1280,
+    height: 800,
+    title: 'ChanRemote — 원격 접속',
+    icon: ICON,
+    backgroundColor: '#0b0e14',
+    autoHideMenuBar: true,
+    webPreferences: { contextIsolation: true, nodeIntegration: false, backgroundThrottling: false }
+  });
+  viewerWin.setMenuBarVisibility(false);
+  viewerWin.loadFile(path.join(__dirname, '..', 'web', 'index.html'));
+  viewerWin.on('closed', () => { viewerWin = null; });
 }
 
 function createWindow() {
@@ -285,8 +333,10 @@ function setupIpc() {
     port: cfg.port,
     turnPort: cfg.turnPort,
     hasPassword: !!cfg.key,
+    deviceId: cfg.deviceId,
+    relay: relayStatus,
     autoStart: !!cfg.autoStart,
-    keepAwake: !!cfg.keepAwake,
+    unattended: !!cfg.unattended,
     upnp: !!cfg.upnp,
     addresses: lanAddresses().map(a => ({ ...a, url: `http://${a.ip}:${cfg.port}` })),
     net: publicNetStatus(),
@@ -299,7 +349,7 @@ function setupIpc() {
   }));
   ipcMain.handle('set-password', (_e, pw) => {
     pw = String(pw || '');
-    if (pw.length < 4) throw new Error('비밀번호는 4자 이상');
+    if (pw.length < 6) throw new Error('비밀번호는 6자 이상');
     config.setPassword(cfg, pw);
     config.save(cfg);
     log('비밀번호가 변경되었어요 — 기존 접속은 모두 끊어요');
@@ -307,7 +357,9 @@ function setupIpc() {
     return true;
   });
   ipcMain.handle('set-autostart', (_e, on) => { cfg.autoStart = !!on; config.save(cfg); applyAutoStart(); return cfg.autoStart; });
-  ipcMain.handle('set-keepawake', (_e, on) => { cfg.keepAwake = !!on; config.save(cfg); updateBlockers(); return cfg.keepAwake; });
+  ipcMain.handle('set-unattended', (_e, on) => { cfg.unattended = !!on; config.save(cfg); updateBlockers(); applyUnattended(); return cfg.unattended; });
+  ipcMain.on('open-viewer', () => openViewerWindow());
+  ipcMain.on('copy-text', (_e, t) => clipboard.writeText(String(t || '')));
   ipcMain.handle('set-upnp', async (_e, on) => { cfg.upnp = !!on; config.save(cfg); upnp.resetCache(); checkNetwork('설정 변경'); return cfg.upnp; });
   ipcMain.handle('recheck-net', () => { upnp.resetCache(); checkNetwork('다시 확인'); return true; });
   ipcMain.handle('set-port', (_e, p) => {
@@ -353,8 +405,15 @@ async function startServers() {
       const c = turnCreds.get(id);
       return {
         iceServers: stunServers(),
-        turn: turn && c ? { port: cfg.turnPort, username: c.username, credential: c.credential } : null,
+        turn: turn && c ? {
+          host: net.upnp === 'ok' && net.externalIp ? net.externalIp : null,
+          lan: relayIp(),
+          port: cfg.turnPort,
+          username: c.username,
+          credential: c.credential
+        } : null,
         addrs: addressesForViewer(),
+        deviceId: cfg.deviceId,
         hostName: os.hostname()
       };
     },
@@ -367,6 +426,8 @@ async function startServers() {
       viewers.set(id, info);
       send('viewer-join', { id, ...info });
       updateBlockers();
+      input.wake(); // 꺼진 모니터 깨우기
+      notify(`${info.name}에서 원격 접속했어요`);
     },
     onResume: id => send('viewer-resume', { id }),
     onSignal: (id, data) => send('signal', { id, data }),
@@ -382,11 +443,25 @@ async function startServers() {
   });
   try {
     await server.start();
-    log(`접속 서버 시작: 포트 ${cfg.port}`);
+    log(`집 안 접속 서버 시작: 포트 ${cfg.port}`);
   } catch (e) {
-    log('접속 서버 시작 실패: ' + e.message);
-    dialog.showErrorBox('ChanRemote', `포트 ${cfg.port}을(를) 열 수 없어요.\n이미 실행 중이거나 다른 프로그램이 사용 중이에요.\n\n${e.message}`);
+    log('집 안 접속 서버 시작 실패: ' + e.message + ' (ID 접속은 계속 돼요)');
   }
+
+  relay = createMqttRelay({
+    deviceId: cfg.deviceId,
+    getKey: () => (cfg.key ? Buffer.from(cfg.key, 'hex') : null),
+    onViewer: sock => server.attach(sock, 'remote'),
+    log,
+    onStatus: st => {
+      const was = relayStatus.connected;
+      relayStatus = st;
+      if (!was && st.connected) log(`중계망 연결됨 (${st.connected}/${st.total}) — PC ID ${cfg.deviceId}로 접속할 수 있어요`);
+      if (was && !st.connected) log('중계망 연결이 모두 끊겼어요 — 인터넷 연결을 확인하세요 (자동으로 다시 연결해요)');
+      send('relay-status', st);
+      updateTray();
+    }
+  });
 }
 
 if (!app.requestSingleInstanceLock()) {
@@ -412,6 +487,7 @@ if (!app.requestSingleInstanceLock()) {
 
     applyAutoStart();
     updateBlockers();
+    applyUnattended();
     await refreshPrimaryIp();
     await startServers();
     checkNetwork('시작');
@@ -422,6 +498,7 @@ if (!app.requestSingleInstanceLock()) {
   app.on('before-quit', () => {
     quitting = true;
     input.releaseAll();
+    if (relay) relay.stop();
     if (server) server.close();
     if (turn) turn.stop();
   });

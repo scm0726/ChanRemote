@@ -27,50 +27,26 @@ function log(line) {
 }
 const localLog = msg => log(`[${new Date().toTimeString().slice(0, 8)}] ${msg}`);
 
-async function showQr(url) {
-  $('#qrImg').src = await H.qr(url);
-  $('#qrText').textContent = url;
-  $('#qrWrap').hidden = false;
-}
-
 function renderAddresses(list) {
-  const box = $('#addrList');
-  box.innerHTML = '';
-  if (!list.length) { box.innerHTML = '<div class="empty">네트워크에 연결돼 있지 않아요</div>'; return; }
-  list.forEach((a, i) => {
-    const row = document.createElement('div');
-    row.className = 'addr';
-    row.innerHTML = `<span class="url"></span>${a.tailscale ? '<span class="tag">Tailscale</span>' : '<span class="tag">와이파이/랜</span>'}`;
-    row.querySelector('.url').textContent = a.url;
-    row.onclick = () => showQr(a.url);
-    box.appendChild(row);
-    if (i === 0) showQr(a.url);
-  });
+  $('#lanHint').textContent = list.length ? `같은 와이파이의 PC 브라우저에서도 접속할 수 있어요: ${list[0].url}` : '';
 }
 
 function renderNet(n) {
   const dot = $('#netDot');
-  dot.className = 'dot ' + (n.upnp === 'ok' ? 'ok' : n.upnp === 'checking' ? 'warn' : 'bad');
-  if (n.upnp === 'ok') {
-    $('#netTitle').textContent = '밖에서도 접속할 수 있어요';
-    $('#netDetail').textContent = `공유기 포트 자동 열기 성공 (TCP ${n.port}, UDP/TCP ${n.turnPort})`;
-  } else if (n.upnp === 'checking') {
-    $('#netTitle').textContent = '확인 중…';
-    $('#netDetail').textContent = '';
-  } else if (n.upnp === 'off') {
-    $('#netTitle').textContent = '외부 접속 꺼짐';
-    $('#netDetail').textContent = '설정에서 "공유기 포트 자동 열기"를 켜세요';
-  } else {
-    $('#netTitle').textContent = '외부 접속 준비가 안 됐어요';
-    $('#netDetail').textContent = `${n.reason || ''} — 공유기에서 TCP ${n.port}, UDP/TCP ${n.turnPort} 포트포워딩을 직접 해도 돼요`;
-  }
-  if (n.wan) {
-    $('#wanAddr').hidden = false;
-    $('#wanUrl').textContent = n.wan;
-  } else {
-    $('#wanAddr').hidden = true;
-  }
+  dot.className = 'dot ' + (n.upnp === 'ok' ? 'ok' : n.upnp === 'checking' ? 'warn' : n.upnp === 'off' ? '' : 'warn');
+  if (n.upnp === 'ok') $('#netDetail').textContent = '공유기 자동 열기 성공 — 엄격한 통신망에서도 접속 가능';
+  else if (n.upnp === 'checking') $('#netDetail').textContent = '공유기 확인 중…';
+  else if (n.upnp === 'off') $('#netDetail').textContent = '꺼짐';
+  else $('#netDetail').textContent = '공유기 자동 열기 안 됨 — 대부분은 그래도 접속돼요';
 }
+
+function renderRelay(r) {
+  const ok = r && r.connected > 0;
+  $('#relayDot').className = 'dot ' + (ok ? 'ok' : 'warn');
+  $('#relayText').textContent = ok ? `접속 대기 중 (중계망 ${r.connected}/${r.total} 연결)` : '인터넷 연결 확인 중… (자동으로 다시 연결해요)';
+}
+
+function formatId(id) { return String(id || '').replace(/(\d{3})(\d{3})(\d{3})/, '$1 $2 $3'); }
 
 function connStateInfo(p) {
   if (!p) return ['warn', '준비 중'];
@@ -109,10 +85,13 @@ async function initUi() {
   iceServers = st.iceServers;
   hostName = st.hostName;
   $('#hostName').textContent = `${st.hostName} · v${st.version}${st.inputOk ? '' : ' · ⚠ 입력 제어 불가'}`;
+  $('#deviceId').textContent = formatId(st.deviceId);
+  $('#copyId').onclick = () => { H.copyText(st.deviceId); $('#copyId').textContent = '복사됨'; setTimeout(() => { $('#copyId').textContent = '복사'; }, 1500); };
+  $('#openViewer').onclick = () => H.openViewer();
+  renderRelay(st.relay);
   $('#autoStart').checked = st.autoStart;
-  $('#keepAwake').checked = st.keepAwake;
+  $('#unattended').checked = st.unattended;
   $('#upnp').checked = st.upnp;
-  $('#portInput').value = st.port;
   if (!st.hasPassword) {
     $('#pwHint').innerHTML = '<b style="color:#fbbf24">먼저 비밀번호를 정해 주세요.</b> 비밀번호가 없으면 아무도 접속할 수 없어요.';
     $('#pwCard').style.borderColor = '#fbbf24';
@@ -129,29 +108,25 @@ async function initUi() {
     try {
       await H.setPassword(pw);
       msg.className = 'msg';
-      msg.textContent = '저장했어요. 폰 앱에서 이 비밀번호로 접속하세요.';
+      msg.textContent = '저장했어요. 다른 기기에서 PC ID와 이 비밀번호로 접속하세요.';
       $('#pwInput').value = '';
       $('#pwCard').style.borderColor = '';
-      $('#pwHint').textContent = '폰 앱이나 다른 PC에서 접속할 때 입력할 비밀번호예요.';
+      $('#pwHint').textContent = '다른 기기에서 접속할 때 입력할 비밀번호예요. 8자 이상, 숫자·영문을 섞으면 안전해요.';
     } catch (e) {
       msg.className = 'msg err';
-      msg.textContent = '비밀번호는 4자 이상이어야 해요';
+      msg.textContent = '비밀번호는 6자 이상이어야 해요';
     }
   };
   $('#pwInput').addEventListener('keydown', e => { if (e.key === 'Enter') $('#pwSave').click(); });
   $('#autoStart').onchange = e => H.setAutoStart(e.target.checked);
-  $('#keepAwake').onchange = e => H.setKeepAwake(e.target.checked);
+  $('#unattended').onchange = e => H.setUnattended(e.target.checked);
   $('#upnp').onchange = e => { renderNet({ upnp: 'checking' }); H.setUpnp(e.target.checked); };
   $('#netRecheck').onclick = () => { renderNet({ upnp: 'checking' }); H.recheckNet(); };
-  $('#portSave').onclick = () => {
-    if (confirm('포트를 바꾸면 프로그램이 다시 시작되고, 폰 앱의 PC 주소도 바꿔야 해요. 계속할까요?')) {
-      H.setPort($('#portInput').value).catch(() => alert('포트는 1024~65535 사이로 입력하세요'));
-    }
-  };
 }
 
 H.on('log', log);
 H.on('net-status', renderNet);
+H.on('relay-status', renderRelay);
 
 // ─────────────────────── 화면 캡처 ───────────────────────
 async function refreshSources() {

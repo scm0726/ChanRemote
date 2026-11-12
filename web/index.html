@@ -30,9 +30,9 @@
   <div id="sheet" class="sheetWrap" hidden>
     <form class="sheet" id="sheetForm" autocomplete="off">
       <h2 id="sheetTitle">PC 추가</h2>
-      <label id="addrField">PC 주소
-        <input id="fAddr" inputmode="url" placeholder="192.168.0.10 또는 외부 주소" autocapitalize="off" spellcheck="false">
-        <span class="hint">PC 프로그램 화면에 나온 주소를 그대로 입력하세요. 집 안 주소만 넣어도 외부 주소는 자동으로 배워요.</span>
+      <label id="addrField">PC ID
+        <input id="fAddr" inputmode="numeric" placeholder="123 456 789" autocomplete="off" maxlength="11">
+        <span class="hint">PC의 ChanRemote 화면에 나온 9자리 ID예요.</span>
       </label>
       <label id="nameField">이름 (선택)
         <input id="fName" placeholder="집 PC">
@@ -135,7 +135,9 @@
 
   <textarea id="kbd" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" aria-label="키보드 입력"></textarea>
 
+  <script src="mqtt.min.js"></script>
   <script src="crypto.js"></script>
+  <script src="relay.js"></script>
   <script src="keymap.js"></script>
   <script src="viewer.js"></script>
 </body>

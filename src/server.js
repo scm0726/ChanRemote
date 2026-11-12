@@ -56,8 +56,10 @@ function createSignalServer(opts) {
     }
   };
 
-  wss.on('connection', (ws, req) => {
-    const ip = (req.socket.remoteAddress || '').replace(/^::ffff:/, '');
+  wss.on('connection', (ws, req) => attach(ws, (req.socket.remoteAddress || '').replace(/^::ffff:/, '')));
+
+  // ws: 실제 웹소켓 또는 중계망(MQTT) 가상 소켓 — 같은 인증/시그널링 처리
+  function attach(ws, ip) {
     ws.isAlive = true;
     ws.on('pong', () => { ws.isAlive = true; });
     const nonce = crypto.randomBytes(16).toString('hex');
@@ -116,7 +118,7 @@ function createSignalServer(opts) {
 
     ws.on('message', raw => {
       let m;
-      try { m = JSON.parse(raw); } catch { return; }
+      try { m = JSON.parse(typeof raw === 'string' ? raw : raw.toString()); } catch { return; }
       if (!m || typeof m !== 'object') return;
       if (m.t === 'ping') return sendWs(ws, { t: 'pong', ts: m.ts });
       if (!id) {
@@ -145,7 +147,7 @@ function createSignalServer(opts) {
       v.leaveTimer = setTimeout(() => removeViewer(id, '시간 초과'), GRACE_MS);
     });
     ws.on('error', () => { /* close에서 처리 */ });
-  });
+  }
 
   function removeViewer(id, why) {
     const v = viewers.get(id);
@@ -166,6 +168,7 @@ function createSignalServer(opts) {
   }, 10000);
 
   return {
+    attach,
     start() {
       return new Promise((resolve, reject) => {
         httpServer.once('error', reject);
