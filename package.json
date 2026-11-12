@@ -1,14 +1,14 @@
 {
   "name": "chanremote",
   "productName": "ChanRemote",
-  "version": "1.1.0",
-  "description": "나만의 원격 제어 프로그램 (PC↔PC, PC↔모바일)",
+  "version": "1.2.0",
+  "description": "나만의 원격 제어 프로그램 (PC↔PC, PC↔모바일) — 무설치",
   "main": "src/main.js",
   "author": "chanmin",
   "license": "MIT",
   "scripts": {
     "start": "electron .",
-    "build": "electron-builder --win nsis"
+    "build": "electron-builder --win portable"
   },
   "dependencies": {
     "koffi": "^2.9.0",
@@ -23,29 +23,24 @@
   "build": {
     "appId": "com.chanmin.chanremote",
     "productName": "ChanRemote",
+    "asar": false,
     "files": [
       "src/**/*",
       "web/**/*",
       "assets/**/*",
       "package.json"
     ],
-    "asarUnpack": [
-      "node_modules/koffi/**/*"
-    ],
     "win": {
       "target": [
-        "nsis"
+        "portable"
       ],
       "icon": "assets/icon.ico",
-      "executableName": "ChanRemote"
+      "requestedExecutionLevel": "asInvoker"
     },
-    "nsis": {
-      "oneClick": false,
-      "perMachine": true,
-      "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true,
-      "include": "build/installer.nsh",
-      "artifactName": "ChanRemote-Setup-${version}.${ext}"
+    "portable": {
+      "artifactName": "ChanRemote-${version}.${ext}",
+      "requestExecutionLevel": "user",
+      "unicode": true
     },
     "publish": null
   }

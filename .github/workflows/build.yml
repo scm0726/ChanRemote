@@ -17,7 +17,7 @@ jobs:
         with:
           node-version: 22
       - run: npm install --no-audit --no-fund
-      - run: npx electron-builder --win nsis --publish never
+      - run: npx electron-builder --win portable --publish never
       - uses: actions/upload-artifact@v4
         with:
           name: windows
@@ -54,11 +54,11 @@ jobs:
           path: out
       - uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.1.${{ github.run_number }}
-          name: ChanRemote 1.1.${{ github.run_number }}
+          tag_name: v1.2.${{ github.run_number }}
+          name: ChanRemote 1.2.${{ github.run_number }}
           make_latest: true
           body: |
-            - PC: ChanRemote-Setup-*.exe 를 받아 설치하세요.
+            - PC: ChanRemote-*.exe 를 받아 더블클릭하면 바로 실행돼요 (설치 불필요).
             - 폰(폴드8): ChanRemote.apk 를 받아 설치하세요.
           files: |
             out/windows/*.exe

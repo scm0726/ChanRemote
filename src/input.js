@@ -7,11 +7,13 @@ const INPUT_MOUSE = 0;
 const INPUT_KEYBOARD = 1;
 
 const MOUSEEVENTF = {
+  MOVE: 0x0001,
   LEFTDOWN: 0x0002, LEFTUP: 0x0004,
   RIGHTDOWN: 0x0008, RIGHTUP: 0x0010,
   MIDDLEDOWN: 0x0020, MIDDLEUP: 0x0040,
   XDOWN: 0x0080, XUP: 0x0100,
-  WHEEL: 0x0800, HWHEEL: 0x1000
+  WHEEL: 0x0800, HWHEEL: 0x1000,
+  VIRTUALDESK: 0x4000, ABSOLUTE: 0x8000
 };
 const KEYEVENTF = { EXTENDED: 0x0001, KEYUP: 0x0002, UNICODE: 0x0004 };
 
@@ -55,14 +57,17 @@ function sendBuffer(buf, count) {
   return api.SendInput(count, buf, INPUT_SIZE);
 }
 
-function writeMouse(buf, i, flags, data = 0) {
+function writeMouse(buf, i, flags, data = 0, dx = 0, dy = 0) {
   const o = i * INPUT_SIZE;
   buf.writeUInt32LE(INPUT_MOUSE, o);
-  buf.writeInt32LE(0, o + 8); // dx
-  buf.writeInt32LE(0, o + 12); // dy
+  buf.writeInt32LE(dx | 0, o + 8); // dx (절대좌표일 땐 0~65535)
+  buf.writeInt32LE(dy | 0, o + 12); // dy
   buf.writeInt32LE(data | 0, o + 16); // mouseData (휠은 음수 가능)
   buf.writeUInt32LE(flags >>> 0, o + 20);
 }
+
+// 가장 최근 절대좌표 (버튼 이벤트에 위치를 함께 실어 정확히 그 자리에서 클릭되게)
+let lastAbs = null;
 
 function writeKey(buf, i, vk, scan, flags) {
   const o = i * INPUT_SIZE;
@@ -72,9 +77,17 @@ function writeKey(buf, i, vk, scan, flags) {
   buf.writeUInt32LE(flags >>> 0, o + 12);
 }
 
-function moveTo(x, y) {
+// 전체 가상 화면 기준 절대좌표(0~65535)로 커서 이동.
+// Windows 화면 배율(125%·150%)과 다중 모니터에 영향받지 않는 방식(원격 프로그램 표준).
+const MOVE_ABS = MOUSEEVENTF.MOVE | MOUSEEVENTF.ABSOLUTE | MOUSEEVENTF.VIRTUALDESK;
+function moveAbs(ax, ay) {
+  ax = Math.max(0, Math.min(65535, Math.round(ax)));
+  ay = Math.max(0, Math.min(65535, Math.round(ay)));
+  lastAbs = { ax, ay };
   if (!api) return;
-  api.SetCursorPos(Math.round(x), Math.round(y));
+  const buf = Buffer.alloc(INPUT_SIZE);
+  writeMouse(buf, 0, MOVE_ABS, 0, ax, ay);
+  sendBuffer(buf, 1);
 }
 
 function buttonFlags(b, down) {
@@ -91,7 +104,9 @@ function button(b, down) {
   if (!api) return;
   const [flags, data] = buttonFlags(b | 0, down);
   const buf = Buffer.alloc(INPUT_SIZE);
-  writeMouse(buf, 0, flags, data);
+  // 버튼 이벤트에 마지막 절대좌표를 함께 실어, 정확히 그 자리에서 눌리게 함
+  if (lastAbs) writeMouse(buf, 0, flags | MOVE_ABS, data, lastAbs.ax, lastAbs.ay);
+  else writeMouse(buf, 0, flags, data);
   sendBuffer(buf, 1);
   if (down) heldButtons.add(b | 0); else heldButtons.delete(b | 0);
 }
@@ -178,4 +193,4 @@ function releaseAll() {
   for (const b of [...heldButtons]) button(b, false);
 }
 
-module.exports = { init, moveTo, button, wheel, key, press, combo, text, releaseAll, wake };
+module.exports = { init, moveAbs, button, wheel, key, press, combo, text, releaseAll, wake };

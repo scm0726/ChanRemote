@@ -1,7 +1,7 @@
 'use strict';
 const {
   app, BrowserWindow, Tray, Menu, ipcMain, desktopCapturer, screen,
-  powerSaveBlocker, clipboard, nativeImage, dialog, shell, Notification
+  powerSaveBlocker, clipboard, nativeImage, dialog, shell
 } = require('electron');
 const { execFile } = require('child_process');
 const path = require('path');
@@ -151,19 +151,30 @@ function watchInterfaces() {
   lastIfaces = now;
 }
 
-// ── 화면 좌표 변환 (정규화 0~1 → 실제 물리 픽셀) ──
+// ── 화면 좌표 변환 ──
+// 한 모니터 안의 정규화 좌표(0~1)를, 전체 가상 화면 기준 절대좌표(0~65535)로 변환.
+// 모두 DIP(배율 적용 전) 좌표로 비율만 계산하므로 화면 배율·다중 모니터에 영향받지 않음.
 let displayCache = null;
 function displays() {
   if (!displayCache) {
     const all = screen.getAllDisplays();
     const primary = screen.getPrimaryDisplay();
-    displayCache = all.map(d => ({
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const d of all) {
+      minX = Math.min(minX, d.bounds.x);
+      minY = Math.min(minY, d.bounds.y);
+      maxX = Math.max(maxX, d.bounds.x + d.bounds.width);
+      maxY = Math.max(maxY, d.bounds.y + d.bounds.height);
+    }
+    const virt = { x: minX, y: minY, width: Math.max(1, maxX - minX), height: Math.max(1, maxY - minY) };
+    const list = all.map(d => ({
       id: String(d.id),
       primary: d.id === primary.id,
-      rect: process.platform === 'win32'
-        ? screen.dipToScreenRect(null, d.bounds)
-        : { x: d.bounds.x * d.scaleFactor, y: d.bounds.y * d.scaleFactor, width: d.bounds.width * d.scaleFactor, height: d.bounds.height * d.scaleFactor }
+      bounds: d.bounds,
+      w: Math.round(d.bounds.width * d.scaleFactor), // 캡처 해상도 표시용
+      h: Math.round(d.bounds.height * d.scaleFactor)
     }));
+    displayCache = { virt, list };
   }
   return displayCache;
 }
@@ -171,22 +182,25 @@ function invalidateDisplays() {
   displayCache = null;
   send('displays-changed', true);
 }
-function toPhys(displayId, nx, ny) {
-  const list = displays();
+function toVirtual(displayId, nx, ny) {
+  const { virt, list } = displays();
   const d = list.find(x => x.id === String(displayId)) || list.find(x => x.primary) || list[0];
-  const r = d.rect;
+  const b = d.bounds;
   const cx = Math.min(1, Math.max(0, Number(nx) || 0));
   const cy = Math.min(1, Math.max(0, Number(ny) || 0));
-  return { x: r.x + cx * (r.width - 1), y: r.y + cy * (r.height - 1) };
+  return {
+    ax: ((b.x - virt.x) + cx * b.width) / virt.width * 65535,
+    ay: ((b.y - virt.y) + cy * b.height) / virt.height * 65535
+  };
 }
 
 function handleInput(m) {
   if (!m || typeof m !== 'object') return;
   try {
     switch (m.t) {
-      case 'mm': { const p = toPhys(m.d, m.x, m.y); input.moveTo(p.x, p.y); break; }
+      case 'mm': { const p = toVirtual(m.d, m.x, m.y); input.moveAbs(p.ax, p.ay); break; }
       case 'mb':
-        if (m.x != null) { const p = toPhys(m.d, m.x, m.y); input.moveTo(p.x, p.y); }
+        if (m.x != null) { const p = toVirtual(m.d, m.x, m.y); input.moveAbs(p.ax, p.ay); }
         input.button(m.b | 0, !!m.down);
         break;
       case 'wh': input.wheel(m.dy | 0, m.dx | 0); break;
@@ -205,13 +219,13 @@ async function getSources() {
   const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 0, height: 0 } });
   const list = displays();
   return sources.map((s, i) => {
-    const d = list.find(x => x.id === String(s.display_id)) || list[i] || list[0];
+    const d = list.list.find(x => x.id === String(s.display_id)) || list.list[i] || list.list[0];
     return {
       id: s.id,
       displayId: d ? d.id : String(s.display_id),
       primary: d ? d.primary : i === 0,
-      width: d ? d.rect.width : 0,
-      height: d ? d.rect.height : 0,
+      width: d ? d.w : 0,
+      height: d ? d.h : 0,
       name: `모니터 ${i + 1}${d && d.primary ? ' (주)' : ''}`
     };
   });
@@ -227,11 +241,15 @@ function updateBlockers() {
 
 function applyAutoStart() {
   const settings = { openAtLogin: !!cfg.autoStart, args: ['--hidden'] };
-  if (!app.isPackaged) {
+  // 무설치(포터블) 실행 파일 경로는 PORTABLE_EXECUTABLE_FILE 로 들어옴
+  const portable = process.env.PORTABLE_EXECUTABLE_FILE;
+  if (portable) {
+    settings.path = portable;
+  } else if (!app.isPackaged) {
     settings.path = process.execPath;
     settings.args = [app.getAppPath(), '--hidden'];
   }
-  app.setLoginItemSettings(settings);
+  try { app.setLoginItemSettings(settings); } catch { /* ignore */ }
 }
 
 function showWindow() {
@@ -271,12 +289,6 @@ async function applyUnattended() {
   await run('powercfg', ['/SETACTIVE', 'SCHEME_CURRENT']);
   const ok = results.filter(Boolean).length;
   log(`무인 접속 설정 적용: 절전·자동 잠금 해제 (${ok}/${results.length})`);
-}
-
-function notify(body) {
-  try {
-    if (Notification.isSupported()) new Notification({ title: 'ChanRemote', body, icon: ICON, silent: true }).show();
-  } catch { /* ignore */ }
 }
 
 // ── 다른 PC에 원격 접속하는 창 ──
@@ -427,7 +439,6 @@ async function startServers() {
       send('viewer-join', { id, ...info });
       updateBlockers();
       input.wake(); // 꺼진 모니터 깨우기
-      notify(`${info.name}에서 원격 접속했어요`);
     },
     onResume: id => send('viewer-resume', { id }),
     onSignal: (id, data) => send('signal', { id, data }),
