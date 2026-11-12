@@ -67,7 +67,7 @@ function createSignalServer(opts) {
     let sess = null;
 
     const info = auth.info();
-    sendWs(ws, { t: 'hello', v: 2, salt: info.salt, iter: info.iter, nonce, host: info.hostName });
+    sendWs(ws, { t: 'hello', v: 3, salt: info.salt, iter: info.iter, master: !!info.master, nonce, host: info.hostName });
 
     const reject = (reason, code) => {
       sendWs(ws, { t: 'auth-fail', reason, code });
@@ -79,15 +79,18 @@ function createSignalServer(opts) {
       let f = fails.get(ip);
       if (f && f.until && f.until <= now) { fails.delete(ip); f = null; }
       if (f && f.until > now) return reject(`비밀번호를 여러 번 틀려 잠겼어요. ${Math.ceil((f.until - now) / 1000)}초 후 다시 시도하세요`, 'locked');
-      if (!auth.info().salt) return reject('호스트 PC에서 먼저 비밀번호를 설정하세요', 'nopw');
-      if (!auth.verify(nonce, m.proof)) {
+      if (!auth.info().salt && !auth.info().master) return reject('호스트 PC에서 먼저 비밀번호를 설정하세요', 'nopw');
+      const matched = auth.verify(nonce, m.proof); // 일치한 키(hex) 또는 null — 개인/마스터 둘 다 허용
+      if (!matched) {
         const count = (f ? f.count : 0) + 1;
         fails.set(ip, { count, until: count >= MAX_FAILS ? now + LOCK_MS : 0 });
         log(`비밀번호 오류 (${ip}) ${count}회`);
         return reject(count >= MAX_FAILS ? '비밀번호를 5번 틀려 5분간 잠겼어요' : '비밀번호가 틀렸어요', 'badpw');
       }
       fails.delete(ip);
-      sess = auth.sessionKey(nonce);
+      sess = auth.sessionKey(matched, nonce);
+      // 중계망 전송 암호화 키 설정 (일치한 비밀번호 기준) — 실제 ws(같은 와이파이)는 해당 없음
+      if (typeof ws.setSessionSecret === 'function') ws.setSessionSecret(matched, nonce);
 
       if (m.resume) {
         for (const [vid, v] of viewers) {

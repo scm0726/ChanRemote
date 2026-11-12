@@ -18,12 +18,19 @@
 
   // ═════════════════════════ PC 목록 ═════════════════════════
   const R = window.CRRelay;
+  // 설정(config.js)과 동일해야 함
+  const MASTER_SALT = 'chanremote-master-v1', MASTER_ITER = 100000;
+  const FLEET_SALT = 'chanremote-fleet-v1', FLEET_ITER = 60000;
   let pcs = store.get('pcs', []);
   // 예전 형식(주소 목록) → 새 형식
   pcs.forEach(p => { if (!p.lan && Array.isArray(p.addrs) && p.addrs.length) p.lan = p.lastAddr || p.addrs[0]; delete p.addrs; delete p.wan; delete p.lastAddr; });
   const savePcs = () => store.set('pcs', pcs);
   const fmtId = id => String(id || '').replace(/(\d{3})(\d{3})(\d{3})/, '$1 $2 $3');
   const cleanId = v => String(v || '').replace(/\D/g, '');
+
+  // 관리자(마스터) 로그인 상태 — 마스터 비밀번호로 "내 PC 묶음" 전체를 봄
+  let admin = null; // { key(hex), fleetId, enc(Uint8Array) }
+  const fleetPcs = new Map(); // id -> { id, name, admin:true }
 
   // PC가 직접 띄워준 페이지(같은 와이파이)로 들어온 경우: 이 PC를 목록에 자동 추가
   const servedByPc = !isApp && /^https?:$/.test(location.protocol) && !!location.host;
@@ -47,30 +54,84 @@
     return p.on ? { cls: 'on', text: '켜짐' } : { cls: 'off', text: '꺼짐' };
   }
 
+  function mkRow(pc, badge) {
+    const st = presenceText(pc);
+    const el = document.createElement('div');
+    el.className = 'pc';
+    el.innerHTML = '<div class="pcIcon">🖥</div><div class="info"><div class="name"></div><div class="addr"></div></div><span class="state"></span><button class="more" aria-label="메뉴">⋮</button>';
+    el.querySelector('.name').textContent = pc.name || pc.hostName || 'PC';
+    el.querySelector('.addr').textContent = badge || (pc.id ? `ID ${fmtId(pc.id)}` : pc.lan);
+    const stEl = el.querySelector('.state');
+    stEl.className = 'state ' + st.cls;
+    stEl.textContent = st.text;
+    el.onclick = e => { if (!e.target.closest('.more')) connectPc(pc); };
+    const more = el.querySelector('.more');
+    if (pc.admin) more.hidden = true; else more.onclick = () => pcMenu(pc);
+    return el;
+  }
+
   function renderHome() {
     const box = $('#pcList');
     box.innerHTML = '';
-    if (!pcs.length) {
-      box.innerHTML = '<div class="emptyCard">아직 추가한 PC가 없어요.<br>PC에서 ChanRemote를 설치하면 나오는<br><b>PC ID</b>와 비밀번호로 추가하세요.</div>';
+    // 관리자 모드: 묶음 PC 먼저
+    if (admin) {
+      const members = [...fleetPcs.values()].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+      const hdr = document.createElement('div');
+      hdr.className = 'listHdr';
+      hdr.innerHTML = `<span>관리자 — 내 PC ${members.length}대</span><button class="linkBtn" id="adminOut">로그아웃</button>`;
+      box.appendChild(hdr);
+      hdr.querySelector('#adminOut').onclick = adminLogout;
+      if (!members.length) {
+        const e = document.createElement('div');
+        e.className = 'emptyCard';
+        e.innerHTML = '이 마스터 비밀번호를 쓰는 PC를 찾는 중…<br>PC 설정에서 같은 <b>마스터 비밀번호</b>를 넣어 두세요.';
+        box.appendChild(e);
+      }
+      for (const pc of members) { if (pc.id) R.watchPresence(pc.id); box.appendChild(mkRow(pc)); }
     }
-    for (const pc of pcs) {
-      if (pc.id) R.watchPresence(pc.id);
-      const st = presenceText(pc);
-      const el = document.createElement('div');
-      el.className = 'pc';
-      el.innerHTML = '<div class="pcIcon">🖥</div><div class="info"><div class="name"></div><div class="addr"></div></div><span class="state"></span><button class="more" aria-label="메뉴">⋮</button>';
-      el.querySelector('.name').textContent = pc.name || pc.hostName || 'PC';
-      el.querySelector('.addr').textContent = pc.id ? `ID ${fmtId(pc.id)}` : pc.lan;
-      const stEl = el.querySelector('.state');
-      stEl.className = 'state ' + st.cls;
-      stEl.textContent = st.text;
-      el.onclick = e => { if (!e.target.closest('.more')) connectPc(pc); };
-      el.querySelector('.more').onclick = () => pcMenu(pc);
-      box.appendChild(el);
+    if (pcs.length) {
+      if (admin) { const h = document.createElement('div'); h.className = 'listHdr'; h.innerHTML = '<span>직접 추가한 PC</span>'; box.appendChild(h); }
+      for (const pc of pcs) { if (pc.id) R.watchPresence(pc.id); box.appendChild(mkRow(pc)); }
+    } else if (!admin) {
+      box.innerHTML = '<div class="emptyCard">아직 추가한 PC가 없어요.<br>PC에서 ChanRemote를 실행하면 나오는<br><b>PC ID</b>와 비밀번호로 추가하세요.<br>또는 <b>관리자 로그인</b>으로 한 번에 불러오세요.</div>';
     }
+    $('#adminBtn').textContent = admin ? '관리자 로그아웃' : '관리자 로그인';
     const n = R.connectedCount();
     $('#homeHint').textContent = R.available() ? (n ? `중계망 연결됨 (${n}/${R.total()})` : '중계망에 연결하는 중…') : '';
   }
+
+  // ── 관리자 로그인 ──
+  function adminLogin(pw) {
+    const keyHex = C.hex(C.pbkdf2(C.utf8(pw), C.utf8(MASTER_SALT), MASTER_ITER, 32));
+    const fleetId = C.hex(C.pbkdf2(C.utf8(pw), C.utf8(FLEET_SALT), FLEET_ITER, 8));
+    const enc = C.hmac(C.unhex(keyHex), C.utf8('fleet'));
+    admin = { key: keyHex, fleetId, enc };
+    store.set('admin', { key: keyHex, fleetId, enc: C.hex(enc) });
+    fleetPcs.clear();
+    R.watchFleet(fleetId, enc, (id, name) => {
+      fleetPcs.set(id, { id, name, admin: true });
+      if (!$('#home').hidden) renderHome();
+    });
+    renderHome();
+  }
+  function adminLogout() {
+    admin = null;
+    fleetPcs.clear();
+    store.set('admin', null);
+    R.stopFleet();
+    renderHome();
+  }
+  // 저장된 관리자 세션 복원
+  (() => {
+    const a = store.get('admin', null);
+    if (a && a.key && a.fleetId && a.enc) {
+      admin = { key: a.key, fleetId: a.fleetId, enc: C.unhex(a.enc) };
+      R.watchFleet(a.fleetId, admin.enc, (id, name) => {
+        fleetPcs.set(id, { id, name, admin: true });
+        if (!$('#home').hidden) renderHome();
+      });
+    }
+  })();
   R.onPresence(() => { if (!$('#home').hidden) renderHome(); });
   R.onStatus(() => { if (!$('#home').hidden) renderHome(); });
 
@@ -130,9 +191,28 @@
   };
 
   function connectPc(pc) {
+    if (pc.admin) { if (!admin) return; return startSession(pc, null, false); }
     if (!pc.key) return openSheet(pc);
     startSession(pc, null, true);
   }
+
+  // 관리자 로그인 버튼/시트
+  $('#adminBtn').onclick = () => {
+    if (admin) { adminLogout(); return; }
+    $('#adminSheet').hidden = false;
+    $('#adminPw').value = '';
+    $('#adminErr').textContent = '';
+    setTimeout(() => $('#adminPw').focus(), 50);
+  };
+  $('#adminCancel').onclick = () => { $('#adminSheet').hidden = true; };
+  $('#adminForm').onsubmit = e => {
+    e.preventDefault();
+    const pw = $('#adminPw').value;
+    if (pw.length < 6) { $('#adminErr').textContent = '마스터 비밀번호 6자 이상'; return; }
+    $('#adminSheet').hidden = true;
+    adminLogin(pw);
+    toast('관리자 로그인 — 내 PC를 불러오는 중…');
+  };
 
   function deviceName() {
     const ua = navigator.userAgent;
@@ -173,6 +253,7 @@
   function startSession(pc, password, remember) {
     teardown(true);
     Object.assign(S, { pc, password, remember, secret: null, ending: false, token: null, authed: false, everConnected: false, backoff: 500 });
+    S.adminKey = pc.admin && admin ? admin.key : null;
     showStage();
     showOverlay(pc.id ? 'PC를 찾는 중…' : 'PC에 연결하는 중…');
     openChannel();
@@ -239,6 +320,13 @@
       S.ch = null;
       if (!S.ending) scheduleReconnect();
     };
+    // 관리자(마스터) 모드: 미리 만들어 둔 마스터 키를 그대로 사용
+    if (S.pc.admin) {
+      if (!hello.master) { endSession(); toast('이 PC에는 마스터 비밀번호가 설정돼 있지 않아요', 4000); return; }
+      finishAuth(ch, hello, S.adminKey, null);
+      return;
+    }
+
     if (!hello.salt) { endSession(); toast('PC 프로그램에서 먼저 비밀번호를 정해 주세요', 4000); return; }
 
     const secret = S.secret && S.secret.salt === hello.salt ? S.secret : (S.pc.salt === hello.salt ? { key: S.pc.key, salt: S.pc.salt } : null);
@@ -249,23 +337,25 @@
       openSheet(pc, 'PC 비밀번호가 바뀌었어요. 다시 입력하세요');
       return;
     }
-    const finish = () => {
-      if (S.ch !== ch) return;
-      const key = C.unhex(keyHex);
-      ch.kenc = C.hmac(key, C.utf8('enc:' + hello.nonce));
-      S.sessKey = C.hmac(key, C.utf8('sess:' + hello.nonce));
-      S.pendingSecret = { key: keyHex, salt: hello.salt };
-      wsSend({ t: 'auth', proof: C.hex(C.hmac(key, C.utf8('auth:' + hello.nonce))), name: deviceName(), resume: S.token });
-    };
     if (S.password != null) {
       showOverlay('비밀번호 확인 중…');
       setTimeout(() => {
         keyHex = C.hex(C.pbkdf2(C.utf8(S.password), C.unhex(hello.salt), hello.iter || 100000, 32));
-        finish();
+        finishAuth(ch, hello, keyHex, hello.salt);
       }, 30);
     } else {
-      finish();
+      finishAuth(ch, hello, keyHex, hello.salt);
     }
+  }
+
+  // 인증 메시지는 평문으로 보내고(증명값은 노출돼도 안전), 암호화 키는 auth-ok 이후에 적용
+  function finishAuth(ch, hello, keyHex, salt) {
+    if (S.ch !== ch) return;
+    const key = C.unhex(keyHex);
+    S.pendingKenc = C.hmac(key, C.utf8('enc:' + hello.nonce));
+    S.sessKey = C.hmac(key, C.utf8('sess:' + hello.nonce));
+    S.pendingSecret = salt ? { key: keyHex, salt } : null;
+    wsSend({ t: 'auth', proof: C.hex(C.hmac(key, C.utf8('auth:' + hello.nonce))), name: deviceName(), resume: S.token });
   }
 
   function wsSend(obj) { if (S.ch && !S.ch.closed) S.ch.send(obj); }
@@ -279,8 +369,9 @@
         S.token = m.token;
         S.turn = m.turn;
         S.ice = m.iceServers || [];
+        if (S.ch && S.pendingKenc) S.ch.kenc = S.pendingKenc; // 이제부터 신호 암호화
         const pc = S.pc;
-        if (S.pendingSecret) {
+        if (S.pendingSecret && !pc.admin) {
           S.secret = S.pendingSecret;
           if (S.remember) { pc.key = S.pendingSecret.key; pc.salt = S.pendingSecret.salt; }
           else { delete pc.key; delete pc.salt; }
@@ -1131,6 +1222,7 @@
   if (Plugins.App && Plugins.App.addListener) {
     Plugins.App.addListener('backButton', () => {
       if (!$('#confirm').hidden) { $('#confirm').hidden = true; return; }
+      if (!$('#adminSheet').hidden) { $('#adminSheet').hidden = true; return; }
       if (!$('#sheet').hidden) { closeSheet(); return; }
       if (!$('#stage').hidden) {
         if (document.activeElement === kbd) { kbd.blur(); return; }

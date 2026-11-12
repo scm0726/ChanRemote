@@ -91,8 +91,11 @@ async function initUi() {
   renderRelay(st.relay);
   $('#autoStart').checked = st.autoStart;
   $('#unattended').checked = st.unattended;
+  $('#startHidden').checked = st.startHidden;
+  $('#trayHidden').checked = st.trayHidden;
+  if (st.hasMaster) { $('#masterInput').placeholder = '설정됨 — 바꾸려면 새로 입력 (지우려면 공백 저장)'; }
   $('#upnp').checked = st.upnp;
-  if (!st.hasPassword) {
+  if (!st.hasPassword && !st.hasMaster) {
     $('#pwHint').innerHTML = '<b style="color:#fbbf24">먼저 비밀번호를 정해 주세요.</b> 비밀번호가 없으면 아무도 접속할 수 없어요.';
     $('#pwCard').style.borderColor = '#fbbf24';
   }
@@ -120,6 +123,24 @@ async function initUi() {
   $('#pwInput').addEventListener('keydown', e => { if (e.key === 'Enter') $('#pwSave').click(); });
   $('#autoStart').onchange = e => H.setAutoStart(e.target.checked);
   $('#unattended').onchange = e => H.setUnattended(e.target.checked);
+  $('#startHidden').onchange = e => H.setStartHidden(e.target.checked);
+  $('#trayHidden').onchange = e => {
+    if (e.target.checked && !confirm('트레이 아이콘을 숨기면 화면에서 완전히 안 보여요.\n다시 열려면 프로그램(exe)을 한 번 더 실행하면 돼요. 계속할까요?')) { e.target.checked = false; return; }
+    H.setTrayHidden(e.target.checked);
+  };
+  $('#masterSave').onclick = async () => {
+    const pw = $('#masterInput').value;
+    const msg = $('#masterMsg');
+    try {
+      const on = await H.setMaster(pw);
+      msg.className = 'msg';
+      msg.textContent = on ? '저장했어요. 다른 기기에서 "관리자 로그인"에 같은 비밀번호를 넣으면 이 PC가 보여요.' : '마스터 비밀번호를 해제했어요.';
+      $('#masterInput').value = '';
+    } catch (err) {
+      msg.className = 'msg err';
+      msg.textContent = '마스터 비밀번호는 6자 이상이어야 해요';
+    }
+  };
   $('#upnp').onchange = e => { renderNet({ upnp: 'checking' }); H.setUpnp(e.target.checked); };
   $('#netRecheck').onclick = () => { renderNet({ upnp: 'checking' }); H.recheckNet(); };
 }

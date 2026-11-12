@@ -14,7 +14,9 @@ const BROKERS = [
   'wss://test.mosquitto.org:8081/mqtt'
 ];
 const PREFIX = 'chanremote/v1';
-const CLEAR_TYPES = new Set(['hello', 'auth-fail']);
+// 인증 전·인증용 메시지는 평문(그래도 비밀번호는 노출 안 됨: HMAC 증명값).
+// 화면/입력 신호(signal)만 비밀번호 키로 암호화한다.
+const CLEAR_TYPES = new Set(['hello', 'auth', 'auth-ok', 'auth-fail', 'kicked', 'ping', 'pong', 'bye']);
 const IDLE_MS = 45000;
 const MAX_CONNS = 20;
 
@@ -30,15 +32,15 @@ class VirtualSocket extends EventEmitter {
     this.authed = false;
     this.lastSeen = Date.now();
   }
+  // 인증이 끝나면 server.js 가 일치한 비밀번호 키로 호출 → 이후 신호는 이 키로 암호화
+  setSessionSecret(keyHex, nonce) {
+    this.kenc = crypto.createHmac('sha256', Buffer.from(keyHex, 'hex')).update('enc:' + nonce).digest();
+    this.authed = true;
+  }
   send(text) {
     if (this.readyState !== 1) return;
     let obj = null;
     try { obj = JSON.parse(text); } catch { /* ignore */ }
-    if (obj && obj.t === 'hello') {
-      const K = this.relay.getKey();
-      this.kenc = K ? crypto.createHmac('sha256', K).update('enc:' + obj.nonce).digest() : null;
-    }
-    if (obj && obj.t === 'auth-ok') this.authed = true;
     if ((obj && CLEAR_TYPES.has(obj.t)) || !this.kenc) this.relay.toViewer(this.cid, { k: 'c', d: text });
     else this.relay.toViewer(this.cid, { k: 'x', d: seal(this.kenc, text) });
   }
@@ -57,7 +59,7 @@ class VirtualSocket extends EventEmitter {
   ping() { /* MQTT 쪽은 자체 생존 확인 사용 */ }
 }
 
-function createMqttRelay({ deviceId, getKey, onViewer, log = () => {}, onStatus = () => {}, brokers = BROKERS }) {
+function createMqttRelay({ deviceId, hostName, getFleet, onViewer, log = () => {}, onStatus = () => {}, brokers = BROKERS }) {
   const hostTopic = `${PREFIX}/${deviceId}/h`;
   const presenceTopic = `${PREFIX}/${deviceId}/p`;
   const seen = new Map();
@@ -66,7 +68,26 @@ function createMqttRelay({ deviceId, getKey, onViewer, log = () => {}, onStatus 
   const clients = [];
   let stopped = false;
 
-  const relay = { getKey, conns, toViewer: null };
+  const relay = { conns, toViewer: null };
+
+  // "내 PC 묶음" 등록: 마스터 비밀번호가 있으면, 같은 묶음 토픽에 이름을 암호화해서 알림(retained)
+  function fleetTopic() {
+    const f = getFleet && getFleet();
+    return f && f.fleetId ? `${PREFIX}/fleet/${f.fleetId}/${deviceId}` : null;
+  }
+  function announceFleet(client) {
+    const f = getFleet && getFleet();
+    const topic = fleetTopic();
+    if (!f || !topic) return;
+    try {
+      // 이름까지 마스터 키로 암호화 → 같은 묶음(마스터 비번 소유자)만 해독 가능
+      const payload = seal(f.enc, JSON.stringify({ id: deviceId, name: hostName() }));
+      client.publish(topic, payload, { qos: 1, retain: true });
+    } catch { /* ignore */ }
+  }
+  function clearFleet(client, fleetId) {
+    try { client.publish(`${PREFIX}/fleet/${fleetId}/${deviceId}`, '', { qos: 1, retain: true }); } catch { /* ignore */ }
+  }
 
   function emitStatus() {
     onStatus({ connected: status.filter(s => s.connected).length, total: status.length, brokers: status.map(s => ({ host: new URL(s.url).hostname, connected: s.connected })) });
@@ -98,10 +119,12 @@ function createMqttRelay({ deviceId, getKey, onViewer, log = () => {}, onStatus 
     const sock = conns.get(cid);
     if (!sock) {
       // PC가 재시작되는 등으로 모르는 연결 → 다시 열라고 알려줌
-      if (msg.k === 'x') relay.toViewer(cid, { k: 'end' });
+      if (msg.k === 'x' || msg.k === 'c') relay.toViewer(cid, { k: 'end' });
       return;
     }
-    if (msg.k === 'x') {
+    if (msg.k === 'c') {
+      sock.receive(String(msg.d || ''));
+    } else if (msg.k === 'x') {
       const text = sock.kenc ? open(sock.kenc, msg.d) : null;
       if (text == null) {
         // 비밀번호가 틀려서 해독 실패 → 인증 실패로 처리
@@ -129,6 +152,7 @@ function createMqttRelay({ deviceId, getKey, onViewer, log = () => {}, onStatus 
       warned = false;
       c.subscribe(hostTopic, { qos: 1 });
       c.publish(presenceTopic, JSON.stringify({ on: 1, t: Date.now() }), { qos: 1, retain: true });
+      announceFleet(c);
       emitStatus();
     });
     c.on('close', () => { if (status[i].connected) { status[i].connected = false; emitStatus(); } });
@@ -147,10 +171,19 @@ function createMqttRelay({ deviceId, getKey, onViewer, log = () => {}, onStatus 
   emitStatus();
 
   return {
+    // 마스터 비밀번호가 바뀌면: 예전 묶음에서 빼고 새 묶음에 등록
+    updateFleet(oldFleetId) {
+      for (const c of clients) {
+        if (!c.connected) continue;
+        if (oldFleetId) clearFleet(c, oldFleetId);
+        announceFleet(c);
+      }
+    },
     stop() {
       if (stopped) return;
       stopped = true;
       clearInterval(sweeper);
+      // 묶음 등록(이름)은 유지 → PC가 꺼져도 관리자 목록에 "꺼짐"으로 남음. presence만 off.
       for (const c of clients) {
         try { if (c.connected) c.publish(presenceTopic, JSON.stringify({ on: 0 }), { qos: 1, retain: true }); } catch { /* ignore */ }
         try { c.end(false); } catch { /* ignore */ }

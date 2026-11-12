@@ -7,13 +7,26 @@
     'wss://test.mosquitto.org:8081/mqtt'
   ];
   const PREFIX = 'chanremote/v1';
+  const CLEAR = new Set(['hello', 'auth', 'auth-ok', 'auth-fail', 'kicked', 'ping', 'pong', 'bye']);
   const C = window.CRCrypto;
   const rid = n => C.hex(crypto.getRandomValues(new Uint8Array(n)));
 
   const clients = [];
-  const subs = new Map(); // topic -> handler(obj)
+  const subs = new Map(); // 정확한 topic -> handler(obj)
+  const rawSubs = new Map(); // 와일드카드 필터 -> handler(payloadStr, topic) : 원시 payload
   const seen = new Map();
   const statusListeners = new Set();
+
+  // MQTT 토픽 와일드카드(+, #) 매칭
+  function topicMatch(filter, topic) {
+    const f = filter.split('/'), t = topic.split('/');
+    for (let i = 0; i < f.length; i++) {
+      if (f[i] === '#') return true;
+      if (f[i] === '+') { if (t[i] === undefined) return false; continue; }
+      if (f[i] !== t[i]) return false;
+    }
+    return f.length === t.length;
+  }
 
   function connectedCount() { return clients.filter(c => c.connected).length; }
   function emitStatus() { statusListeners.forEach(fn => { try { fn(connectedCount()); } catch { /* ignore */ } }); }
@@ -26,16 +39,22 @@
       });
       c.on('connect', () => {
         for (const topic of subs.keys()) c.subscribe(topic, { qos: 1 });
+        for (const filter of rawSubs.keys()) c.subscribe(filter, { qos: 1 });
         emitStatus();
       });
       c.on('close', emitStatus);
       c.on('offline', emitStatus);
       c.on('error', () => {});
       c.on('message', (topic, payload) => {
+        const payloadStr = payload.toString();
+        // 원시(와일드카드) 핸들러 먼저: 멤버 알림 등 평문 래핑이 아닌 경우
+        for (const [filter, fn] of rawSubs) {
+          if (topicMatch(filter, topic)) { try { fn(payloadStr, topic); } catch { /* ignore */ } }
+        }
         const fn = subs.get(topic);
         if (!fn) return;
         let msg;
-        try { msg = JSON.parse(payload.toString()); } catch { return; }
+        try { msg = JSON.parse(payloadStr); } catch { return; }
         if (msg && msg.m) {
           if (seen.has(msg.m)) return;
           seen.set(msg.m, Date.now());
@@ -54,7 +73,13 @@
   }
   function unsubscribe(topic) {
     subs.delete(topic);
+    rawSubs.delete(topic);
     clients.forEach(c => { if (c.connected) { try { c.unsubscribe(topic); } catch { /* ignore */ } } });
+  }
+  function rawSubscribe(filter, fn) {
+    ensure();
+    rawSubs.set(filter, fn);
+    clients.forEach(c => { if (c.connected) c.subscribe(filter, { qos: 1 }); });
   }
   function publish(topic, obj) {
     ensure();
@@ -110,7 +135,9 @@
     ch.send = obj => {
       if (ch.closed) return;
       const text = JSON.stringify(obj);
-      if (ch.kenc) publish(hostTopic, { k: 'x', c: cid, d: C.seal(ch.kenc, text) });
+      // 인증 전·인증용 메시지는 평문, 그 외(신호)는 비밀번호 키로 암호화
+      if (ch.kenc && obj && !CLEAR.has(obj.t)) publish(hostTopic, { k: 'x', c: cid, d: C.seal(ch.kenc, text) });
+      else publish(hostTopic, { k: 'c', c: cid, d: text });
     };
     ch.close = remote => {
       if (ch.closed) return;
@@ -123,10 +150,36 @@
     return ch;
   }
 
+  // 관리자 로그인: "내 PC 묶음" 토픽을 구독해, 마스터 키로 암호화된 멤버(이름)를 풀어 목록을 받음
+  let fleetSub = null;
+  function watchFleet(fleetId, encBytes, onMember) {
+    stopFleet();
+    fleetSub = `${PREFIX}/fleet/${fleetId}/#`;
+    rawSubscribe(fleetSub, (payloadStr) => {
+      if (!payloadStr) return; // 빈 payload = 묶음에서 제거됨(retained clear)
+      const t = C.open(encBytes, payloadStr);
+      if (t == null) return;
+      let m;
+      try { m = JSON.parse(t); } catch { return; }
+      if (!m || !m.id) return;
+      watchPresence(m.id);
+      onMember(m.id, m.name || 'PC');
+    });
+  }
+  function stopFleet() {
+    if (fleetSub) {
+      rawSubs.delete(fleetSub);
+      clients.forEach(c => { if (c.connected) { try { c.unsubscribe(fleetSub); } catch { /* ignore */ } } });
+      fleetSub = null;
+    }
+  }
+
   window.CRRelay = {
     ensure,
     openChannel,
     watchPresence,
+    watchFleet,
+    stopFleet,
     presence: id => presence.get(id),
     onPresence: fn => presenceListeners.add(fn),
     onStatus: fn => statusListeners.add(fn),

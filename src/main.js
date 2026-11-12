@@ -259,6 +259,19 @@ function showWindow() {
   win.focus();
 }
 
+// 트레이 아이콘 만들기/숨기기
+function applyTray() {
+  if (cfg.trayHidden) {
+    if (tray) { try { tray.destroy(); } catch { /* ignore */ } tray = null; }
+    return;
+  }
+  if (tray) { updateTray(); return; }
+  tray = new Tray(nativeImage.createFromPath(ICON).resize({ width: 16, height: 16 }));
+  tray.on('click', showWindow);
+  tray.on('double-click', showWindow);
+  updateTray();
+}
+
 function updateTray() {
   if (!tray) return;
   tray.setToolTip(`ChanRemote — ID ${cfg.deviceId} — ${viewers.size ? `접속 ${viewers.size}명` : relayStatus.connected ? '대기 중' : '인터넷 연결 확인 중'}`);
@@ -316,7 +329,8 @@ function createWindow() {
     minHeight: 560,
     title: 'ChanRemote',
     icon: ICON,
-    show: !startHidden,
+    // 첫 실행(비밀번호 미설정)은 창을 보여줘 설정하게 함. 설정돼 있고 숨김이면 트레이로.
+    show: !startHidden && !(cfg.startHidden && cfg.key),
     backgroundColor: '#0e1117',
     autoHideMenuBar: true,
     webPreferences: {
@@ -345,11 +359,14 @@ function setupIpc() {
     port: cfg.port,
     turnPort: cfg.turnPort,
     hasPassword: !!cfg.key,
+    hasMaster: !!cfg.masterKey,
     deviceId: cfg.deviceId,
     relay: relayStatus,
     autoStart: !!cfg.autoStart,
     unattended: !!cfg.unattended,
     upnp: !!cfg.upnp,
+    startHidden: !!cfg.startHidden,
+    trayHidden: !!cfg.trayHidden,
     addresses: lanAddresses().map(a => ({ ...a, url: `http://${a.ip}:${cfg.port}` })),
     net: publicNetStatus(),
     viewers: [...viewers.entries()].map(([id, v]) => ({ id, ...v })),
@@ -368,8 +385,21 @@ function setupIpc() {
     if (server) server.kickAll();
     return true;
   });
+  ipcMain.handle('set-master', (_e, pw) => {
+    pw = String(pw || '');
+    if (pw && pw.length < 6) throw new Error('마스터 비밀번호는 6자 이상');
+    const oldFleet = cfg.fleetId;
+    config.setMasterPassword(cfg, pw);
+    config.save(cfg);
+    if (relay) relay.updateFleet(oldFleet !== cfg.fleetId ? oldFleet : null);
+    log(pw ? '관리자(마스터) 비밀번호를 설정했어요 — 이 PC가 "내 PC 묶음"에 등록돼요' : '마스터 비밀번호를 해제했어요');
+    if (server) server.kickAll();
+    return !!cfg.masterKey;
+  });
   ipcMain.handle('set-autostart', (_e, on) => { cfg.autoStart = !!on; config.save(cfg); applyAutoStart(); return cfg.autoStart; });
   ipcMain.handle('set-unattended', (_e, on) => { cfg.unattended = !!on; config.save(cfg); updateBlockers(); applyUnattended(); return cfg.unattended; });
+  ipcMain.handle('set-start-hidden', (_e, on) => { cfg.startHidden = !!on; config.save(cfg); return cfg.startHidden; });
+  ipcMain.handle('set-tray-hidden', (_e, on) => { cfg.trayHidden = !!on; config.save(cfg); applyTray(); return cfg.trayHidden; });
   ipcMain.on('open-viewer', () => openViewerWindow());
   ipcMain.on('copy-text', (_e, t) => clipboard.writeText(String(t || '')));
   ipcMain.handle('set-upnp', async (_e, on) => { cfg.upnp = !!on; config.save(cfg); upnp.resetCache(); checkNetwork('설정 변경'); return cfg.upnp; });
@@ -409,9 +439,9 @@ async function startServers() {
     webDir: path.join(__dirname, '..', 'web'),
     log,
     auth: {
-      info: () => ({ salt: cfg.salt, iter: cfg.iter, hostName: os.hostname() }),
+      info: () => ({ salt: cfg.salt, iter: cfg.iter, master: !!cfg.masterKey, hostName: os.hostname() }),
       verify: (nonce, proof) => config.verifyProof(cfg, nonce, proof),
-      sessionKey: nonce => config.sessionKey(cfg, nonce)
+      sessionKey: (matched, nonce) => config.sessionKey(matched, nonce)
     },
     extraAuthOk: id => {
       const c = turnCreds.get(id);
@@ -461,7 +491,8 @@ async function startServers() {
 
   relay = createMqttRelay({
     deviceId: cfg.deviceId,
-    getKey: () => (cfg.key ? Buffer.from(cfg.key, 'hex') : null),
+    hostName: () => os.hostname(),
+    getFleet: () => (cfg.fleetId ? { fleetId: cfg.fleetId, enc: config.fleetEncKey(cfg) } : null),
     onViewer: sock => server.attach(sock, 'remote'),
     log,
     onStatus: st => {
@@ -487,10 +518,7 @@ if (!app.requestSingleInstanceLock()) {
     setupIpc();
     createWindow();
 
-    tray = new Tray(nativeImage.createFromPath(ICON).resize({ width: 16, height: 16 }));
-    tray.on('click', showWindow);
-    tray.on('double-click', showWindow);
-    updateTray();
+    applyTray();
 
     screen.on('display-added', invalidateDisplays);
     screen.on('display-removed', invalidateDisplays);

@@ -47,6 +47,16 @@
     </section>
 
     <section class="card">
+      <h2>관리자(마스터) 비밀번호</h2>
+      <p class="hint">내 모든 PC에 <b>같은 마스터 비밀번호</b>를 넣어 두면, 폰·다른 PC에서 <b>관리자 로그인</b> 한 번으로 ID 없이 전부 목록에 떠요. (선택 사항)</p>
+      <div class="row">
+        <input type="password" id="masterInput" placeholder="마스터 비밀번호 (6자 이상)" autocomplete="new-password">
+        <button id="masterSave">저장</button>
+      </div>
+      <div class="msg" id="masterMsg"></div>
+    </section>
+
+    <section class="card">
       <h2>접속 중인 기기</h2>
       <div id="viewerList"><div class="empty">아직 접속한 기기가 없어요</div></div>
     </section>
@@ -55,6 +65,8 @@
       <h2>설정</h2>
       <label class="toggle"><input type="checkbox" id="unattended"> <span><b>무인 접속</b> — 자리에 아무도 없어도 바로 접속 (절전·자동 화면잠금 해제)</span></label>
       <label class="toggle"><input type="checkbox" id="autoStart"> 윈도우 시작 시 자동 실행 (트레이로)</label>
+      <label class="toggle"><input type="checkbox" id="startHidden"> <span>실행하면 창 없이 <b>바로 숨기기</b> (트레이로)</span></label>
+      <label class="toggle"><input type="checkbox" id="trayHidden"> <span>트레이 아이콘까지 숨기기 — 다시 열려면 프로그램을 한 번 더 실행</span></label>
       <label class="toggle"><input type="checkbox" id="upnp"> 공유기 자동 열기 (직접 연결이 막힌 통신망 대비)</label>
       <div class="netRow small">
         <span class="dot" id="netDot"></span>

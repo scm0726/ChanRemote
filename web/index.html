@@ -21,7 +21,10 @@
       </div>
     </header>
     <div id="pcList"></div>
-    <button id="addPcBtn" class="primary wide">PC 추가</button>
+    <div class="homeBtns">
+      <button id="addPcBtn" class="primary">PC 추가</button>
+      <button id="adminBtn" class="ghost">관리자 로그인</button>
+    </div>
     <p class="hint center" id="homeHint"></p>
     <div id="toast" class="toast" hidden></div>
   </section>
@@ -45,6 +48,22 @@
       <div class="btnRow">
         <button type="button" id="sheetCancel" class="ghost">취소</button>
         <button type="submit" class="primary" id="sheetOk">연결</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- ───── 관리자 로그인 ───── -->
+  <div id="adminSheet" class="sheetWrap" hidden>
+    <form class="sheet" id="adminForm" autocomplete="off">
+      <h2>관리자 로그인</h2>
+      <p class="hint">내 모든 PC에 넣어 둔 <b>마스터 비밀번호</b>를 입력하면, ID 없이 전부 목록에 떠요.</p>
+      <label>마스터 비밀번호
+        <input id="adminPw" type="password" placeholder="마스터 비밀번호" autocomplete="off">
+      </label>
+      <div class="err" id="adminErr"></div>
+      <div class="btnRow">
+        <button type="button" id="adminCancel" class="ghost">취소</button>
+        <button type="submit" class="primary">로그인</button>
       </div>
     </form>
   </div>
