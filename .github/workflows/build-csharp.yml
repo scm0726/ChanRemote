@@ -1,0 +1,53 @@
+name: 빌드 (C# 네이티브 호스트)
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - 'csharp/**'
+      - '.github/workflows/build-csharp.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: 빌드 (self-contained)
+        working-directory: csharp/ChanRemoteHost
+        run: dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=false -o publish
+
+      - name: ffmpeg 내려받아 함께 포장
+        working-directory: csharp/ChanRemoteHost
+        shell: pwsh
+        run: |
+          $url = 'https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-full.7z'
+          curl.exe -L $url -o ff.7z
+          7z x ff.7z -off
+          $exe = Get-ChildItem -Recurse -Path ff -Filter ffmpeg.exe | Select-Object -First 1
+          Copy-Item $exe.FullName publish/ffmpeg.exe
+          Compress-Archive -Path publish/* -DestinationPath ChanRemoteHost-win64.zip -Force
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chanremote-csharp
+          path: csharp/ChanRemoteHost/ChanRemoteHost-win64.zip
+
+      - name: 릴리스로 올리기
+        if: github.event_name != 'pull_request'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: csharp-v0.1.${{ github.run_number }}
+          name: ChanRemote C# 프로토타입 0.1.${{ github.run_number }}
+          make_latest: false
+          body: |
+            C# 네이티브 호스트 (같은 와이파이 프로토타입). ffmpeg 포함.
+            압축 풀고 ChanRemoteHost.exe 실행 → 폰 크롬에서 http://PC주소:8787 접속.
+          files: csharp/ChanRemoteHost/ChanRemoteHost-win64.zip
