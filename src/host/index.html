@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; media-src 'self' blob: mediastream:">
+  <title>ChanRemote</title>
+  <link rel="stylesheet" href="host.css">
+</head>
+<body>
+  <header>
+    <img src="../../assets/icon.png" alt="" class="logo">
+    <div>
+      <h1>ChanRemote</h1>
+      <div class="sub" id="hostName">-</div>
+    </div>
+    <span class="badge" id="statusBadge">대기 중</span>
+  </header>
+
+  <main>
+    <section class="card" id="pwCard">
+      <h2>접속 비밀번호</h2>
+      <p class="hint" id="pwHint">폰 앱이나 다른 PC에서 접속할 때 입력할 비밀번호예요.</p>
+      <div class="row">
+        <input type="password" id="pwInput" placeholder="새 비밀번호 (4자 이상)" autocomplete="new-password">
+        <button id="pwSave">저장</button>
+      </div>
+      <div class="msg" id="pwMsg"></div>
+    </section>
+
+    <section class="card">
+      <h2>외부 접속 (LTE·회사 등)</h2>
+      <div class="netRow">
+        <span class="dot" id="netDot"></span>
+        <div class="grow">
+          <div id="netTitle">확인 중…</div>
+          <div class="meta" id="netDetail"></div>
+        </div>
+        <button class="ghost" id="netRecheck">다시 확인</button>
+      </div>
+      <div class="addr" id="wanAddr" hidden>
+        <span class="url" id="wanUrl"></span><span class="tag ts">외부</span>
+      </div>
+      <p class="hint">폰 앱에 이 PC를 한 번만 추가해 두면, 집에선 와이파이로·밖에선 외부 주소로 자동 연결돼요.</p>
+    </section>
+
+    <section class="card">
+      <h2>집 안 접속 주소</h2>
+      <p class="hint">같은 와이파이에서 쓰는 주소예요. 눌러서 QR을 띄우면 폰 카메라로 찍어 바로 열 수 있어요.</p>
+      <div id="addrList"></div>
+      <div class="qrWrap" id="qrWrap" hidden>
+        <img id="qrImg" alt="QR">
+        <div id="qrText"></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>접속 중인 기기</h2>
+      <div id="viewerList"><div class="empty">아직 접속한 기기가 없어요</div></div>
+    </section>
+
+    <section class="card">
+      <h2>설정</h2>
+      <label class="toggle"><input type="checkbox" id="autoStart"> 윈도우 시작 시 자동 실행 (트레이로)</label>
+      <label class="toggle"><input type="checkbox" id="keepAwake"> PC 절전 모드 방지 (항상 접속 가능)</label>
+      <label class="toggle"><input type="checkbox" id="upnp"> 공유기 포트 자동 열기 (외부 접속용)</label>
+      <div class="row">
+        <span class="label">접속 포트</span>
+        <input type="number" id="portInput" min="1024" max="65535" style="width:110px">
+        <button id="portSave" class="ghost">변경 후 재시작</button>
+      </div>
+      <p class="hint">창을 닫아도 트레이(시계 옆)에서 계속 실행돼요. 완전히 끄려면 트레이 아이콘 → 종료.</p>
+    </section>
+
+    <section class="card">
+      <h2>로그</h2>
+      <pre id="log"></pre>
+    </section>
+  </main>
+
+  <script src="host.js"></script>
+</body>
+</html>

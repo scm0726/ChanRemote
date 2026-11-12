@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
+  <meta name="theme-color" content="#0b0e14">
+  <meta name="mobile-web-app-capable" content="yes">
+  <title>ChanRemote</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icon-192.png">
+  <link rel="stylesheet" href="viewer.css">
+</head>
+<body>
+  <!-- ───── PC 목록 ───── -->
+  <section id="home" class="screen">
+    <header class="homeHead">
+      <img src="icon-192.png" alt="" class="logo">
+      <div>
+        <h1>ChanRemote</h1>
+        <div class="sub">내 PC 원격 제어</div>
+      </div>
+    </header>
+    <div id="pcList"></div>
+    <button id="addPcBtn" class="primary wide">PC 추가</button>
+    <p class="hint center" id="homeHint"></p>
+    <div id="toast" class="toast" hidden></div>
+  </section>
+
+  <!-- ───── PC 추가 / 비밀번호 입력 ───── -->
+  <div id="sheet" class="sheetWrap" hidden>
+    <form class="sheet" id="sheetForm" autocomplete="off">
+      <h2 id="sheetTitle">PC 추가</h2>
+      <label id="addrField">PC 주소
+        <input id="fAddr" inputmode="url" placeholder="192.168.0.10 또는 외부 주소" autocapitalize="off" spellcheck="false">
+        <span class="hint">PC 프로그램 화면에 나온 주소를 그대로 입력하세요. 집 안 주소만 넣어도 외부 주소는 자동으로 배워요.</span>
+      </label>
+      <label id="nameField">이름 (선택)
+        <input id="fName" placeholder="집 PC">
+      </label>
+      <label>비밀번호
+        <input id="fPw" type="password" placeholder="PC 프로그램에서 정한 비밀번호">
+      </label>
+      <label class="check"><input type="checkbox" id="fRemember" checked> 비밀번호 기억하기</label>
+      <div class="err" id="sheetErr"></div>
+      <div class="btnRow">
+        <button type="button" id="sheetCancel" class="ghost">취소</button>
+        <button type="submit" class="primary" id="sheetOk">연결</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- ───── 원격 화면 ───── -->
+  <section id="stage" class="screen" hidden>
+    <div id="viewport" tabindex="0">
+      <video id="video" autoplay playsinline muted></video>
+      <div id="cursor" hidden></div>
+      <div id="statChip" class="chip" hidden></div>
+      <div id="modeHint" class="modeHint" hidden></div>
+      <div id="overlay" class="overlay" hidden>
+        <div class="spinner"></div>
+        <div id="overlayText">연결 중…</div>
+        <button id="overlayCancel" class="ghost small">연결 끊기</button>
+      </div>
+      <button id="showBar" class="floatBtn" hidden aria-label="도구 보이기">⋯</button>
+    </div>
+
+    <div id="keysPanel" class="panel" hidden></div>
+
+    <div id="settingsPanel" class="panel" hidden>
+      <div class="setRow">
+        <span>조작 방식</span>
+        <div class="seg" id="modeSeg">
+          <button data-v="trackpad">터치패드</button>
+          <button data-v="direct">직접 터치</button>
+        </div>
+      </div>
+      <div class="setRow">
+        <span>화질</span>
+        <div class="seg" id="qualitySeg">
+          <button data-v="auto">자동</button>
+          <button data-v="high">고화질</button>
+          <button data-v="saver">절약</button>
+          <button data-v="low">저속</button>
+        </div>
+      </div>
+      <div class="setRow">
+        <span>커서 속도</span>
+        <input type="range" id="sens" min="0.5" max="3" step="0.1">
+      </div>
+      <div class="setRow">
+        <span>PC 소리</span>
+        <button id="soundBtn" class="ghost small">켜기</button>
+      </div>
+      <div class="setRow">
+        <span>연결 정보 표시</span>
+        <button id="statsBtn" class="ghost small">끄기</button>
+      </div>
+      <div class="setRow col">
+        <span>클립보드 (복사·붙여넣기)</span>
+        <textarea id="clipText" rows="3" placeholder="여기에 붙여넣고 PC로 보내거나, PC 클립보드를 가져오세요"></textarea>
+        <div class="btnRow">
+          <button id="clipGet" class="ghost small">PC에서 가져오기</button>
+          <button id="clipSet" class="ghost small">PC로 보내기</button>
+          <button id="clipType" class="ghost small">PC에 입력</button>
+        </div>
+      </div>
+      <div class="statDetail" id="statDetail"></div>
+      <div class="btnRow">
+        <button id="fsBtn" class="ghost small">전체화면</button>
+        <button id="hideBarBtn" class="ghost small">도구 숨기기</button>
+        <button id="disconnectBtn" class="danger small">연결 끊기</button>
+      </div>
+    </div>
+
+    <div id="screensPanel" class="panel" hidden></div>
+
+    <nav id="toolbar">
+      <button data-act="kbd"><span class="ic">⌨</span><span>키보드</span></button>
+      <button data-act="keys"><span class="ic">⌘</span><span>특수키</span></button>
+      <button data-act="mode"><span class="ic" id="modeIc">☝</span><span id="modeLabel">터치패드</span></button>
+      <button data-act="screens"><span class="ic">▣</span><span>모니터</span></button>
+      <button data-act="settings"><span class="ic">⚙</span><span>설정</span></button>
+    </nav>
+  </section>
+
+  <div id="confirm" class="sheetWrap" hidden>
+    <div class="sheet">
+      <h2 id="confirmText">연결을 끊을까요?</h2>
+      <div class="btnRow">
+        <button id="confirmNo" class="ghost">취소</button>
+        <button id="confirmYes" class="danger">끊기</button>
+      </div>
+    </div>
+  </div>
+
+  <textarea id="kbd" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" aria-label="키보드 입력"></textarea>
+
+  <script src="crypto.js"></script>
+  <script src="keymap.js"></script>
+  <script src="viewer.js"></script>
+</body>
+</html>

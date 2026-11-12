@@ -1,0 +1,13 @@
+{
+  "appId": "com.chanmin.chanremote",
+  "appName": "ChanRemote",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "http",
+    "cleartext": true
+  },
+  "android": {
+    "allowMixedContent": true,
+    "backgroundColor": "#0b0e14"
+  }
+}

@@ -1,0 +1,69 @@
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: #0e1117; color: #e6e8ee;
+  font: 14px/1.5 "Segoe UI", "Malgun Gothic", sans-serif;
+}
+header {
+  display: flex; align-items: center; gap: 12px;
+  padding: 16px 18px; border-bottom: 1px solid #1f2430; background: #121722;
+  position: sticky; top: 0; z-index: 2;
+}
+.logo { width: 40px; height: 40px; }
+h1 { margin: 0; font-size: 18px; }
+.sub { color: #8b93a7; font-size: 12px; }
+.badge {
+  margin-left: auto; padding: 4px 10px; border-radius: 999px; font-size: 12px;
+  background: #222a38; color: #9aa4ba;
+}
+.badge.on { background: #113a24; color: #4ade80; }
+main { padding: 14px; display: grid; gap: 12px; }
+.card { background: #151a24; border: 1px solid #222937; border-radius: 12px; padding: 14px 16px; }
+h2 { margin: 0 0 8px; font-size: 14px; color: #c7cede; }
+.hint { margin: 0 0 10px; color: #8b93a7; font-size: 12.5px; }
+.row { display: flex; gap: 8px; align-items: center; margin: 6px 0; }
+.label { color: #9aa4ba; }
+input[type=password], input[type=number], input[type=text] {
+  flex: 1; background: #0e121a; border: 1px solid #2a3243; color: #e6e8ee;
+  border-radius: 8px; padding: 9px 10px; font-size: 14px; outline: none;
+}
+input:focus { border-color: #4f7cff; }
+button {
+  background: #3d6bff; color: #fff; border: 0; border-radius: 8px;
+  padding: 9px 14px; font-size: 13.5px; cursor: pointer;
+}
+button:hover { filter: brightness(1.1); }
+button.ghost { background: #232b3a; color: #c7cede; }
+button.danger { background: #3a1d22; color: #ff8a8a; }
+.msg { font-size: 12.5px; min-height: 18px; color: #4ade80; }
+.msg.err { color: #ff8a8a; }
+.addr {
+  display: flex; align-items: center; gap: 8px; padding: 8px 10px; margin: 6px 0;
+  background: #0f141d; border: 1px solid #222937; border-radius: 8px; cursor: pointer;
+}
+.addr:hover { border-color: #3d6bff; }
+.addr .url { font-family: Consolas, monospace; font-size: 14px; flex: 1; }
+.tag { font-size: 11px; padding: 2px 7px; border-radius: 999px; background: #232b3a; color: #9aa4ba; }
+.tag.ts { background: #1c2a4d; color: #8fb0ff; }
+.qrWrap { text-align: center; margin-top: 10px; }
+.qrWrap img { width: 220px; height: 220px; border-radius: 10px; background: #fff; padding: 6px; }
+#qrText { font-family: Consolas, monospace; color: #9aa4ba; margin-top: 6px; }
+.viewer {
+  display: flex; align-items: center; gap: 10px; padding: 10px; margin: 6px 0;
+  background: #0f141d; border: 1px solid #222937; border-radius: 8px;
+}
+.viewer .name { font-weight: 600; }
+.viewer .meta { font-size: 12px; color: #8b93a7; }
+.viewer .grow { flex: 1; }
+.dot { width: 9px; height: 9px; border-radius: 50%; background: #666; }
+.dot.ok { background: #4ade80; } .dot.warn { background: #fbbf24; } .dot.bad { background: #f87171; }
+.empty { color: #6b7385; font-size: 13px; }
+.toggle { display: flex; gap: 8px; align-items: center; margin: 6px 0; cursor: pointer; }
+pre#log {
+  margin: 0; max-height: 180px; overflow: auto; background: #0b0e14; border-radius: 8px;
+  padding: 8px 10px; font: 12px/1.5 Consolas, monospace; color: #9aa4ba; white-space: pre-wrap;
+}
+.netRow { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.netRow .grow { flex: 1; }
+.meta { font-size: 12px; color: #8b93a7; }
+.tag.ts { background: #12351f; color: #6ee7a0; }
+#wanAddr { cursor: default; }

@@ -1,0 +1,16 @@
+{
+  "name": "chanremote-android",
+  "version": "1.0.0",
+  "private": true,
+  "description": "ChanRemote 안드로이드 앱 (Capacitor로 web/ 뷰어를 감싼 것)",
+  "dependencies": {
+    "@capacitor/android": "^8.0.0",
+    "@capacitor/app": "^8.0.0",
+    "@capacitor/clipboard": "^8.0.0",
+    "@capacitor/core": "^8.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "^4.0.0",
+    "@capacitor/cli": "^8.0.0"
+  }
+}
